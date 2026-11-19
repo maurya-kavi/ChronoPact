@@ -1,21 +1,66 @@
 # ChronoPact
 
-ChronoPact is a governed time and attendance exception-resolution agent. It detects anomalies before payroll cutoff, proposes policy-compliant corrections, and requires explicit HR or manager approval before any timecard mutation or payroll state change.
+ChronoPact is a governed Time and Attendance Exception Resolution Agent built for Dayforce Use Case 5. It detects workforce timecard anomalies before payroll cutoff, proposes policy-compliant corrections, and requires explicit human approval before any timecard mutation or immutable audit entry.
 
-## Monorepo architecture
+## Problem statement
 
-- `backend/` - Node.js, Express, TypeScript, Prisma, PostgreSQL, Zod, Groq-compatible OpenAI SDK, Qdrant, local embeddings, OpenAPI, and Vitest.
-- `frontend/` - React and Vite employee/HR application shell with Tailwind CSS and Lucide icons.
-- `docling-service/` - Python FastAPI sidecar that parses PDF and DOCX policy documents with Docling.
+Enterprise payroll teams must reconcile missed punches, breaks, overtime, schedule variance, leave conflicts, and rest-gap violations before cutoff. ChronoPact separates deterministic compliance calculation from generative reasoning: TypeScript detects and verifies compliance; open-weight AI explains and proposes corrections; HR retains the final approval authority.
 
-## Local setup
+## Model and license compliance
+
+| Component | Model / Technology | License | Deployment |
+|---|---|---|---|
+| Primary reasoning LLM | `openai/gpt-oss-120b` | Apache 2.0 | Groq OpenAI-compatible inference API |
+| Fallback and evaluation LLM | `openai/gpt-oss-20b` | Apache 2.0 | Groq OpenAI-compatible inference API |
+| Local embeddings | `Xenova/all-MiniLM-L6-v2` | Apache 2.0 | 384-dimension embeddings via Transformers.js |
+| Document parser | IBM Docling | MIT | Python FastAPI sidecar |
+
+Groq is used only as an inference provider. The system can also point `LLM_BASE_URL` at a local Ollama OpenAI-compatible endpoint. Review upstream model and provider terms before production use.
+
+## Architecture
+
+```text
++-----------------------+       +------------------------------+
+| React / Vite / Tailwind| -->   | Express / TypeScript API     |
+| Employee + HR Views   |       | Zod routes, OpenAPI, Prisma  |
++----------+------------+       +-------+----------+-----------+
+           |                            |          |
+           |                    +-------v----+     v
+           |                    |  Deterministic |  POST /punches
+           |                    |  Rule Engine   |  POST /exceptions
+           |                    +-------+--------+-----------+
+           |                            |          |
++----------v------------+       +-------v----+ +---v----------------+
+| IBM Docling Sidecar   | -->   | PostgreSQL | | Qdrant Hybrid RAG  |
+| PDF / DOCX / TXT      |       | Prisma     | | Region + category   |
++-----------------------+       +------------+ | metadata filtering |
+                                             +---------------------+
+```
+
+## Five-layer harness guardrails
+
+1. **Deterministic detection:** TypeScript computes gross/net time, breaks, overtime, shift variance, leave conflict, rest gap, and punch sequence.
+2. **Metadata-filtered policy RAG:** Qdrant retrieves region and anomaly-category matching policy clauses; PostgreSQL is the fallback.
+3. **Strict Zod schema and retry:** LLM output is JSON validated up to three attempts, with validation errors sent back to the model.
+4. **Post-fix simulation gate:** Every proposed punch sequence is re-evaluated before it is shown as verified.
+5. **Human approval:** HR must approve, edit and approve, or escalate. Resolutions mutate PunchLog only through an explicit action and create an immutable AuditLog record.
+
+## Monorepo layout
+
+```text
+backend/          Express, Prisma, deterministic engine, RAG, LLM, APIs
+frontend/         React, Vite, Tailwind, Employee and HR dashboards
+docling-service/  FastAPI and IBM Docling PDF/DOCX/TXT parser
+```
+
+## Setup
 
 ### Prerequisites
 
 - Node.js 20+
 - PostgreSQL 15+
 - Python 3.11+
-- Docker or a local Qdrant instance
+- Docker or an accessible Qdrant instance
 
 ### Backend
 
@@ -29,7 +74,8 @@ npm run db:seed
 npm run dev
 ```
 
-The API is available at `http://localhost:4000`, health checks at `/health`, and Swagger UI at `/api-docs`.
+Backend API: `http://localhost:4000`  
+Swagger: `http://localhost:4000/api-docs`
 
 ### Frontend
 
@@ -39,32 +85,65 @@ npm install
 npm run dev
 ```
 
+Frontend: `http://localhost:5173`
+
 ### Docling sidecar
 
 ```bash
 cd docling-service
 python -m venv .venv
+# Windows
 .venv/Scripts/activate
+# macOS/Linux
+# source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-For Unix-like shells, activate the virtual environment with `source .venv/bin/activate`.
+### Environment variables
 
-### Qdrant
+```env
+PORT=4000
+DATABASE_URL="postgresql://postgres:password@localhost:5432/chronopact?schema=public"
+GROQ_API_KEY=""
+LLM_BASE_URL="https://api.groq.com/openai/v1"
+LLM_MODEL="openai/gpt-oss-120b"
+LLM_EVAL_MODEL="openai/gpt-oss-20b"
+OLLAMA_BASE_URL="http://localhost:11434/v1"
+QDRANT_URL="http://localhost:6333"
+QDRANT_API_KEY=""
+DOCLING_SERVICE_URL="http://localhost:8001"
+VITE_API_BASE_URL="http://localhost:4000/api"
+```
+
+Start Qdrant locally with:
 
 ```bash
 docker run -d --name chronopact-qdrant -p 6333:6333 qdrant/qdrant:latest
 ```
 
-## Model and License Compliance
+## Tests and benchmarks
 
-ChronoPact uses open-weight models only. The default Groq configuration uses `llama-3.3-70b-versatile`, which is distributed under the Llama 3.3 Community License. For faster evaluation and tests, `llama-3.1-8b-instant` is available. Groq Cloud access is configured through the OpenAI-compatible endpoint `https://api.groq.com/openai/v1`.
+```bash
+cd backend
+npm test
+npm run build
+npm run eval:llm
 
-The model provider is configurable through environment variables. Set `LLM_BASE_URL=http://localhost:11434/v1` for local Ollama compatibility, and set `LLM_MODEL` to an installed Ollama model. Llama model terms and applicable redistribution/use restrictions must be reviewed before deployment. A Groq API key or local provider remains responsible for model execution.
+cd ../frontend
+npm run build
 
-Embeddings use local `Xenova/all-MiniLM-L6-v2` (384 dimensions); no external embedding API is required.
+cd ..
+python -m py_compile docling-service/main.py
+```
 
-## Design guardrails
+`npm test` excludes live LLM calls and always runs offline. `npm run eval:llm` automatically skips live assertions when `GROQ_API_KEY` is absent.
 
-All time arithmetic, overtime calculations, break checks, rest-gap checks, schedule conflicts, and leave conflicts are implemented deterministically. LLM output is never used to detect anomalies or perform time arithmetic. AI proposals are validated with Zod, simulated through the deterministic guardrails, and remain proposed until an explicit human resolution is recorded in the immutable audit log.
+## Sample evaluation benchmark
+
+| Anomaly | Expected Policy | Guardrail | Schema |
+|---|---|---|---|
+| MISSED_CLOCK_OUT | POL-PUNCH-01 | Pass | Pass |
+| MISSING_MANDATORY_MEAL_BREAK | POL-BRK-01 | Pass | Pass |
+| INVALID_PUNCH_SEQUENCE | POL-PUNCH-02 | Pass | Pass |
+| UNAPPROVED_DAILY_OVERTIME | POL-OT-01 | Pass | Pass |

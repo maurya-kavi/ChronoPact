@@ -130,6 +130,16 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/TimecardException"
+  /api/exceptions/{id}:
+    get:
+      operationId: getException
+      parameters:
+        - $ref: "#/components/parameters/ExceptionId"
+      responses:
+        "200":
+          description: Exception details with guardrail metadata
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/exceptions/{id}/propose:
     post:
       operationId: proposeFix
@@ -181,6 +191,15 @@ components:
   responses:
     BadRequest:
       description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+    NotFound:
+      description: Resource not found
       content:
         application/json:
           schema:

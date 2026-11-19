@@ -139,7 +139,7 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
       `${rule.policyCode}: ${rule.title}\n${rule.ruleText}\nthreshold=${JSON.stringify(rule.thresholdJson)}`,
     ).join("\n\n");
     const response = await client.chat.completions.create({
-      model: process.env.LLM_MODEL ?? "llama-3.3-70b-versatile",
+      model: process.env.LLM_MODEL ?? "openai/gpt-oss-120b",
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
@@ -156,6 +156,9 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
             `Shift: ${JSON.stringify({ scheduledStart: shift.scheduledStart.toISOString(), scheduledEnd: shift.scheduledEnd.toISOString(), date: shift.date })}`,
             "Return proposedPunches as the complete employee-date punch sequence in chronological order, not as a replacement for only the anomalous punch.",
             "Preserve valid existing punches. For durations over 5 hours, ensure a 30-minute BREAK_START/BREAK_END pair exists.",
+            exception.anomalyCode === "UNAPPROVED_DAILY_OVERTIME"
+              ? "For an UNAPPROVED_DAILY_OVERTIME proposal that makes an automatic correction, reduce the proposed OUT time so net worked duration is at most 9 hours and include a complete punch sequence. Otherwise use FLAG_FOR_OVERTIME_APPROVAL only if the overtime must remain uncorrected."
+              : "",
             `Retrieved policies:\n${policyBlock}`,
             lastValidationError ? `Validation error from previous response: ${lastValidationError}` : "",
           ].join("\n\n"),

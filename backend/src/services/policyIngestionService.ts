@@ -52,7 +52,7 @@ export async function ingestPolicyDocument(
   for (let attempt = 0; attempt < 3; attempt++) {
     const retryInstruction = lastError ? `\nThe previous result failed validation: ${String(lastError)}. Return only corrected valid JSON.` : "";
     const response = await client.chat.completions.create({
-      model: process.env.LLM_MODEL ?? "llama-3.3-70b-versatile",
+      model: process.env.LLM_MODEL ?? "openai/gpt-oss-120b",
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
@@ -102,3 +102,9 @@ export async function ingestPolicyDocument(
   const rules = await prisma.policyRule.findMany({ where: { policyCode: { in: policyCodes } } });
   return { rules, markdownCharacters: markdown.length };
 }
+
+
+
+
+
+
