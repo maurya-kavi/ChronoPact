@@ -55,7 +55,7 @@ hrRouter.post("/api/exceptions/scan", async (_request, response, next) => {
 
 hrRouter.get("/api/exceptions", async (request, response, next) => {
   try {
-    const status = z.enum(["OPEN", "PROPOSED", "APPROVED", "ESCALATED"]).optional().safeParse(request.query.status);
+    const status = z.enum(["UNRESOLVED", "OPEN", "PROPOSED", "APPROVED", "ESCALATED", "ALL"]).optional().safeParse(request.query.status);
     const severity = z.enum(["HIGH", "MEDIUM", "LOW"]).optional().safeParse(request.query.severity);
     if (!status.success || !severity.success) return response.status(400).json({ error: "Invalid status or severity filter" });
     const date = typeof request.query.date === "string" ? z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(request.query.date) : undefined;
@@ -66,7 +66,11 @@ hrRouter.get("/api/exceptions", async (request, response, next) => {
 
     const exceptions = await prisma.timecardException.findMany({
       where: {
-        ...(status.data ? { status: status.data } : {}),
+        ...(status.data === "UNRESOLVED"
+          ? { status: { in: ["OPEN", "PROPOSED", "ESCALATED"] as const } }
+          : status.data && status.data !== "ALL"
+            ? { status: status.data as "OPEN" | "PROPOSED" | "APPROVED" | "ESCALATED" }
+            : {}),
         ...(severity.data ? { severity: severity.data } : {}),
         ...(employeeId ? { employeeId } : {}),
         ...(date?.data ? { date: date.data } : {}),

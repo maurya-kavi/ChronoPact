@@ -184,7 +184,12 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
       const shift = shifts.find((item) => item.date === date);
       const dayPunches = punches.filter((punch) => punch.date === date).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       const leave = leaves.find((item) => item.status === "APPROVED" && date >= item.startDate && date <= item.endDate);
-      const exception = exceptions.find((item) => item.date === date);
+      const unresolvedException = exceptions.find(
+        (item) => item.date === date && ["OPEN", "PROPOSED", "ESCALATED"].includes(item.status),
+      );
+      const approvedException = exceptions.find(
+        (item) => item.date === date && item.status === "APPROVED",
+      );
       const firstIn = dayPunches.find((punch) => punch.punchType === "IN");
       const lastOut = [...dayPunches].reverse().find((punch) => punch.punchType === "OUT");
       let netMinutes = 0;
@@ -206,9 +211,10 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
         ? Number((expectedHours - netWorkedHours).toFixed(2))
         : 0;
       let status = "CLEAN";
-      if (leave) status = "ON_LEAVE";
+      if (approvedException && !unresolvedException) status = "RESOLVED";
+      else if (leave) status = "ON_LEAVE";
       else if (!firstIn || (firstIn && !lastOut)) status = "MISSING_PUNCH";
-      else if (exception) status = "EXCEPTION_FLAGGED";
+      else if (unresolvedException) status = "EXCEPTION_FLAGGED";
       else if (overtimeHours > 0) status = "OVERTIME";
       else if (undertimeHours > 0) status = "UNDERTIME";
 
@@ -224,7 +230,7 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
         overtimeHours,
         undertimeHours,
         status,
-        exception: exception ?? null,
+        exception: unresolvedException ?? null,
       };
     }).filter((row) => statusFilter === "ALL" || row.status === statusFilter);
 
@@ -244,7 +250,9 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
         missingPunchCount: rows.filter((row) => row.status === "MISSING_PUNCH").length,
         totalOvertimeHours: Number(rows.reduce((sum, row) => sum + row.overtimeHours, 0).toFixed(2)),
         totalUndertimeHours: Number(rows.reduce((sum, row) => sum + row.undertimeHours, 0).toFixed(2)),
-        openExceptionsCount: exceptions.filter((exception) => exception.status === "OPEN" || exception.status === "PROPOSED").length,
+        openExceptionsCount: exceptions.filter((exception) =>
+          ["OPEN", "PROPOSED", "ESCALATED"].includes(exception.status),
+        ).length,
       },
       dailyActivity: rows,
       leaveRequests: leaves,
