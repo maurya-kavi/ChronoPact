@@ -1,0 +1,351 @@
+openapi: 3.0.3
+info:
+  title: ChronoPact API
+  version: 1.0.0
+  description: Governed time and attendance exception resolution APIs.
+servers:
+  - url: http://localhost:4000
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: Service health
+  /api/punches:
+    post:
+      operationId: recordPunch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PunchInput"
+      responses:
+        "201":
+          description: Punch recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Punch"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/leaves:
+    post:
+      operationId: requestLeave
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeaveInput"
+      responses:
+        "201":
+          description: Leave request created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/employees:
+    get:
+      operationId: listEmployees
+      responses:
+        "200":
+          description: Employees
+    post:
+      operationId: createEmployee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeInput"
+      responses:
+        "201":
+          description: Employee created
+  /api/employees/{id}/dashboard:
+    get:
+      operationId: getEmployeeDashboard
+      parameters:
+        - $ref: "#/components/parameters/EmployeeId"
+      responses:
+        "200":
+          description: Employee dashboard
+  /api/policies/upload:
+    post:
+      operationId: uploadPolicy
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, region]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                region:
+                  type: string
+                  enum: [ALL, IN, US]
+      responses:
+        "202":
+          description: Document queued for extraction
+  /api/policies:
+    get:
+      operationId: listPolicies
+      responses:
+        "200":
+          description: Policy rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PolicyRule"
+  /api/exceptions/scan:
+    post:
+      operationId: scanExceptions
+      responses:
+        "200":
+          description: Exception scan result
+  /api/exceptions:
+    get:
+      operationId: listExceptions
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, PROPOSED, APPROVED, ESCALATED]
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [HIGH, MEDIUM, LOW]
+      responses:
+        "200":
+          description: Timecard exceptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimecardException"
+  /api/exceptions/{id}/propose:
+    post:
+      operationId: proposeFix
+      parameters:
+        - $ref: "#/components/parameters/ExceptionId"
+      responses:
+        "202":
+          description: AI fix proposal generated and guardrail checked
+  /api/exceptions/{id}/resolve:
+    post:
+      operationId: resolveException
+      parameters:
+        - $ref: "#/components/parameters/ExceptionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolutionInput"
+      responses:
+        "200":
+          description: Human resolution recorded
+  /api/audit-logs:
+    get:
+      operationId: listAuditLogs
+      responses:
+        "200":
+          description: Immutable audit history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+components:
+  parameters:
+    EmployeeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    ExceptionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+  schemas:
+    PunchInput:
+      type: object
+      required: [employeeId, punchType, timestamp]
+      properties:
+        employeeId:
+          type: string
+        punchType:
+          type: string
+          enum: [IN, BREAK_START, BREAK_END, OUT]
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [BIOMETRIC, WEB_PORTAL, HR_MANUAL]
+          default: WEB_PORTAL
+    Punch:
+      allOf:
+        - $ref: "#/components/schemas/PunchInput"
+        - type: object
+          properties:
+            id:
+              type: string
+            date:
+              type: string
+              pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    LeaveInput:
+      type: object
+      required: [employeeId, startDate, endDate, leaveType, reason]
+      properties:
+        employeeId:
+          type: string
+        startDate:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        endDate:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        leaveType:
+          type: string
+          enum: [SICK, CASUAL, EARNED]
+        reason:
+          type: string
+    EmployeeInput:
+      type: object
+      required: [empCode, name, email, role, department, region, hourlyRate]
+      properties:
+        empCode:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        department:
+          type: string
+        region:
+          type: string
+          enum: [IN, US]
+        hourlyRate:
+          type: number
+    PolicyRule:
+      type: object
+      properties:
+        id:
+          type: string
+        policyCode:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+          enum: [PUNCH, OVERTIME, BREAK, REST_GAP, LEAVE, SCHEDULE]
+        region:
+          type: string
+          enum: [ALL, IN, US]
+        ruleText:
+          type: string
+        thresholdJson:
+          type: object
+    TimecardException:
+      type: object
+      required: [id, employeeId, date, anomalyCode, severity, status]
+      properties:
+        id:
+          type: string
+        employeeId:
+          type: string
+        date:
+          type: string
+        anomalyCode:
+          type: string
+        severity:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        status:
+          type: string
+          enum: [OPEN, PROPOSED, APPROVED, ESCALATED]
+        deterministicDetailsJson:
+          type: object
+        aiProposalJson:
+          type: object
+          nullable: true
+        guardrailVerified:
+          type: boolean
+    ResolutionInput:
+      type: object
+      required: [decision, actionBy]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVED, EDITED_AND_APPROVED, ESCALATED]
+        actionBy:
+          type: string
+        citedPolicyCode:
+          type: string
+        afterPunchesJson:
+          type: object
+        notes:
+          type: string
+        editedPunches:
+          type: array
+          items:
+            type: object
+            required: [punchType, isoTimestamp]
+            properties:
+              punchType:
+                type: string
+                enum: [IN, BREAK_START, BREAK_END, OUT]
+              isoTimestamp:
+                type: string
+                format: date-time
+    AuditLog:
+      type: object
+      required: [id, exceptionId, employeeId, actionBy, decision, citedPolicyCode, createdAt]
+      properties:
+        id:
+          type: string
+        exceptionId:
+          type: string
+        employeeId:
+          type: string
+        actionBy:
+          type: string
+        decision:
+          type: string
+          enum: [APPROVED, EDITED_AND_APPROVED, ESCALATED]
+        beforePunchesJson:
+          type: object
+        afterPunchesJson:
+          type: object
+        citedPolicyCode:
+          type: string
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

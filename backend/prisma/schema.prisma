@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PunchType {
+  IN
+  BREAK_START
+  BREAK_END
+  OUT
+}
+
+enum PunchSource {
+  BIOMETRIC
+  WEB_PORTAL
+  HR_MANUAL
+}
+
+enum LeaveType {
+  SICK
+  CASUAL
+  EARNED
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PolicyCategory {
+  PUNCH
+  OVERTIME
+  BREAK
+  REST_GAP
+  LEAVE
+  SCHEDULE
+}
+
+enum ExceptionSeverity {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ExceptionStatus {
+  OPEN
+  PROPOSED
+  APPROVED
+  ESCALATED
+}
+
+enum AuditDecision {
+  APPROVED
+  EDITED_AND_APPROVED
+  ESCALATED
+}
+
+model Employee {
+  id             String             @id @default(cuid())
+  empCode        String             @unique
+  name           String
+  email          String             @unique
+  role           String
+  department     String
+  region         String
+  hourlyRate     Float
+  createdAt      DateTime           @default(now())
+  shifts         Shift[]
+  punchLogs      PunchLog[]
+  leaveRequests  LeaveRequest[]
+  exceptions     TimecardException[]
+  auditLogs      AuditLog[]
+
+  @@index([region])
+  @@index([department])
+}
+
+model Shift {
+  id             String   @id @default(cuid())
+  employeeId     String
+  date           String
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  expectedMinutes Int
+  isWeeklyOff    Boolean  @default(false)
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@index([employeeId, date])
+}
+
+model PunchLog {
+  id         String      @id @default(cuid())
+  employeeId String
+  date       String
+  punchType  PunchType
+  timestamp  DateTime
+  source     PunchSource
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, date])
+  @@index([timestamp])
+}
+
+model LeaveRequest {
+  id        String      @id @default(cuid())
+  employeeId String
+  startDate String
+  endDate   String
+  leaveType LeaveType
+  reason    String
+  status    LeaveStatus
+  employee  Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, startDate, endDate])
+  @@index([status])
+}
+
+model PolicyRule {
+  id            String         @id @default(cuid())
+  policyCode    String         @unique
+  title         String
+  category      PolicyCategory
+  region        String
+  ruleText      String
+  thresholdJson Json
+  qdrantPointId String?
+
+  @@index([category])
+  @@index([region])
+}
+
+model TimecardException {
+  id                     String            @id @default(cuid())
+  employeeId             String
+  date                   String
+  anomalyCode            String
+  severity               ExceptionSeverity
+  status                 ExceptionStatus
+  deterministicDetailsJson Json
+  aiProposalJson         Json?
+  guardrailVerified      Boolean           @default(false)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  employee               Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  auditLogs              AuditLog[]
+
+  @@index([employeeId, date])
+  @@index([status])
+  @@index([anomalyCode])
+}
+
+model AuditLog {
+  id                String        @id @default(cuid())
+  exceptionId       String
+  employeeId        String
+  actionBy          String
+  decision          AuditDecision
+  beforePunchesJson Json
+  afterPunchesJson  Json
+  citedPolicyCode   String
+  notes             String
+  createdAt         DateTime      @default(now())
+  exception         TimecardException @relation(fields: [exceptionId], references: [id], onDelete: Cascade)
+  employee          Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([exceptionId])
+  @@index([employeeId])
+  @@index([createdAt])
+}
