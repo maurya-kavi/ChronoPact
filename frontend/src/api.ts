@@ -1,7 +1,10 @@
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api").replace(/\/$/, "");
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  const token = localStorage.getItem("chronopact_token");
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(body.error ?? `Request failed with status ${response.status}`);
@@ -18,6 +21,12 @@ export interface Employee {
   department: string;
   region: "IN" | "US";
   hourlyRate: number;
+  team?: string;
+  address?: string;
+  phone?: string;
+  isRegistered?: boolean;
+  status?: string;
+  joiningDate?: string;
 }
 
 export interface Punch {
@@ -34,7 +43,9 @@ export interface LeaveRequest {
   endDate: string;
   leaveType: "SICK" | "CASUAL" | "EARNED";
   reason: string;
-  status: "PENDING" | "APPROVED" | "REJECTED";
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  hrNotes?: string;
+  createdAt?: string;
 }
 
 export interface Shift {
@@ -75,6 +86,7 @@ export interface TimecardProposal {
   proposedPunches: ProposedPunch[];
   confidenceScore: number;
   employeeMessage?: string;
+  modelUsed?: string;
   guardrailVerified?: boolean;
   remainingAnomalies?: Array<{ anomalyCode: string; severity: string }>;
 }

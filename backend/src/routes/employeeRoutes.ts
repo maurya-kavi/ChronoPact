@@ -109,6 +109,9 @@ employeeRouter.post("/api/punches", async (request, response, next) => {
       prisma.punchLog.findMany({ where: { employeeId: parsed.data.employeeId, date }, orderBy: { timestamp: "asc" } }),
       prisma.leaveRequest.findMany({ where: { employeeId: parsed.data.employeeId, status: "APPROVED" } }),
     ]);
+    const activePolicies = await prisma.policyRule.findMany({
+      select: { policyCode: true, thresholdJson: true },
+    });
     if (shift) {
       const contextShift: ShiftContext = {
         id: shift.id,
@@ -131,7 +134,11 @@ employeeRouter.post("/api/punches", async (request, response, next) => {
         date: item.date,
         source: item.source,
       }));
-      const anomalies = evaluateTimecard(enginePunches, { shift: contextShift, approvedLeaves, weeklyWorkedMinutesBeforeToday: 0 });
+      const anomalies = evaluateTimecard(
+        enginePunches,
+        { shift: contextShift, approvedLeaves, weeklyWorkedMinutesBeforeToday: 0 },
+        activePolicies,
+      );
       for (const anomaly of anomalies) {
         const existing = await prisma.timecardException.findFirst({
           where: { employeeId: parsed.data.employeeId, date, anomalyCode: anomaly.anomalyCode, status: "OPEN" },
@@ -188,6 +195,7 @@ employeeRouter.post("/api/punches", async (request, response, next) => {
               })),
               weeklyWorkedMinutesBeforeToday: 0,
             },
+            activePolicies,
           ).map((anomaly) => anomaly.anomalyCode)
         : [],
     });

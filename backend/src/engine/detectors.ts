@@ -9,7 +9,11 @@ import {
   totalBreakMinutes,
 } from "./timeMath";
 
-export function detectPunchSequenceAnomalies(punches: PunchInput[], shift: ShiftContext): DetectedAnomaly[] {
+export function detectPunchSequenceAnomalies(
+  punches: PunchInput[],
+  shift: ShiftContext,
+  policyConfig?: Record<string, Record<string, unknown>>,
+): DetectedAnomaly[] {
   const anomalies: DetectedAnomaly[] = [];
   const hasIn = punches.some((p) => p.punchType === "IN");
   const hasOut = punches.some((p) => p.punchType === "OUT");
@@ -65,32 +69,39 @@ export function detectOvertimeRisks(
   punches: PunchInput[],
   shift: ShiftContext,
   weeklyWorkedMinutesBeforeToday: number,
+  policyConfig?: Record<string, Record<string, unknown>>,
 ): DetectedAnomaly[] {
   const anomalies: DetectedAnomaly[] = [];
   const todayWorked = netWorkedMinutes(punches);
-  if (todayWorked > 540) {
+  const dailyHours = Number(policyConfig?.["POL-OT-01"]?.dailyHours ?? 9);
+  const dailyMinutes = dailyHours * 60;
+  if (policyConfig === undefined || policyConfig["POL-OT-01"]) {
+    if (todayWorked > dailyMinutes) {
     anomalies.push({
       anomalyCode: "UNAPPROVED_DAILY_OVERTIME",
       suggestedPolicyCode: "POL-OT-01",
       severity: "MEDIUM",
       deterministicDetails: {
         todayNetMinutes: todayWorked,
-        thresholdMinutes: 540,
-        excessMinutes: todayWorked - 540,
+        thresholdMinutes: dailyMinutes,
+        excessMinutes: todayWorked - dailyMinutes,
         shiftDate: shift.date,
       },
     });
   }
+  }
 
   const weeklyTotal = weeklyWorkedMinutesBeforeToday + todayWorked;
-  if (weeklyTotal > 2400) {
+  const weeklyHours = Number(policyConfig?.["POL-OT-02"]?.weeklyHours ?? 40);
+  const weeklyMinutes = weeklyHours * 60;
+  if ((policyConfig === undefined || policyConfig["POL-OT-02"]) && weeklyTotal > weeklyMinutes) {
     anomalies.push({
       anomalyCode: "WEEKLY_OVERTIME_THRESHOLD_BREACH",
       suggestedPolicyCode: "POL-OT-02",
       severity: "HIGH",
       deterministicDetails: {
         weeklyTotalMinutes: weeklyTotal,
-        thresholdMinutes: 2400,
+        thresholdMinutes: weeklyMinutes,
         weeklyWorkedMinutesBeforeToday,
         todayNetMinutes: todayWorked,
       },
@@ -103,12 +114,13 @@ export function detectScheduleAndLeaveConflicts(
   punches: PunchInput[],
   shift: ShiftContext,
   approvedLeaves: LeaveContext[],
+  policyConfig?: Record<string, Record<string, unknown>>,
 ): DetectedAnomaly[] {
   const anomalies: DetectedAnomaly[] = [];
   const onApprovedLeave = approvedLeaves.some(
     (leave) => leave.status === "APPROVED" && shift.date >= leave.startDate && shift.date <= leave.endDate,
   );
-  if (punches.length > 0 && (onApprovedLeave || shift.isWeeklyOff)) {
+  if ((policyConfig === undefined || policyConfig["POL-LV-01"]) && punches.length > 0 && (onApprovedLeave || shift.isWeeklyOff)) {
     anomalies.push({
       anomalyCode: "PUNCH_ON_APPROVED_LEAVE",
       suggestedPolicyCode: "POL-LV-01",
@@ -132,12 +144,14 @@ export function detectScheduleAndLeaveConflicts(
       endDeviation = Math.abs(lastOut.getTime() - shift.scheduledEnd.getTime()) / 60000;
       if (lastOut.getTime() < shift.scheduledStart.getTime()) endDeviation += 1440;
     }
-    if (startDeviation > 120 || endDeviation > 120) {
+    const varianceHours = Number(policyConfig?.["POL-SCH-01"]?.varianceHours ?? 2);
+    const varianceMinutes = varianceHours * 60;
+    if ((policyConfig === undefined || policyConfig["POL-SCH-01"]) && (startDeviation > varianceMinutes || endDeviation > varianceMinutes)) {
       anomalies.push({
         anomalyCode: "SHIFT_WINDOW_MISMATCH",
         suggestedPolicyCode: "POL-SCH-01",
         severity: "LOW",
-        deterministicDetails: { startDeviationMinutes: Math.round(startDeviation), endDeviationMinutes: Math.round(endDeviation), thresholdMinutes: 120 },
+        deterministicDetails: { startDeviationMinutes: Math.round(startDeviation), endDeviationMinutes: Math.round(endDeviation), thresholdMinutes: varianceMinutes },
       });
     }
   }
@@ -147,11 +161,14 @@ export function detectScheduleAndLeaveConflicts(
 export function detectLaborPolicyBreaches(
   punches: PunchInput[],
   previousShiftOutTimestamp?: Date,
+  policyConfig?: Record<string, Record<string, unknown>>,
 ): DetectedAnomaly[] {
   const anomalies: DetectedAnomaly[] = [];
   const continuousMinutes = longestContinuousWorkStretchMinutes(punches);
   const breakMinutes = totalBreakMinutes(punches);
-  if (continuousMinutes > 300 && breakMinutes < 30) {
+  const continuousHours = Number(policyConfig?.["POL-BRK-01"]?.continuousHoursBeforeBreak ?? 5);
+  const minimumBreak = Number(policyConfig?.["POL-BRK-01"]?.minimumBreakMinutes ?? 30);
+  if ((policyConfig === undefined || policyConfig["POL-BRK-01"]) && continuousMinutes > continuousHours * 60 && breakMinutes < minimumBreak) {
     anomalies.push({
       anomalyCode: "MISSING_MANDATORY_MEAL_BREAK",
       suggestedPolicyCode: "POL-BRK-01",
@@ -159,8 +176,8 @@ export function detectLaborPolicyBreaches(
       deterministicDetails: {
         longestContinuousMinutes: continuousMinutes,
         breakMinutes,
-        thresholdMinutes: 300,
-        minimumBreakMinutes: 30,
+        thresholdMinutes: continuousHours * 60,
+        minimumBreakMinutes: minimumBreak,
       },
     });
   }
@@ -168,12 +185,13 @@ export function detectLaborPolicyBreaches(
   const currentIn = [...punches].filter((p) => p.punchType === "IN").sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())[0];
   if (previousShiftOutTimestamp && currentIn) {
     const gap = restGapHours(previousShiftOutTimestamp, currentIn.timestamp);
-    if (gap < 11) {
+    const minimumRest = Number(policyConfig?.["POL-RST-01"]?.minimumRestHours ?? 11);
+    if ((policyConfig === undefined || policyConfig["POL-RST-01"]) && gap < minimumRest) {
       anomalies.push({
         anomalyCode: "INSUFFICIENT_REST_GAP",
         suggestedPolicyCode: "POL-RST-01",
         severity: "HIGH",
-        deterministicDetails: { gapHours: Number(gap.toFixed(2)), thresholdHours: 11 },
+        deterministicDetails: { gapHours: Number(gap.toFixed(2)), thresholdHours: minimumRest },
       });
     }
   }

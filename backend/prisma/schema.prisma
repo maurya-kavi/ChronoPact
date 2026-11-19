@@ -18,6 +18,8 @@ enum PunchSource {
   BIOMETRIC
   WEB_PORTAL
   HR_MANUAL
+  EMPLOYEE
+  HR_APPROVED
 }
 
 enum LeaveType {
@@ -30,6 +32,7 @@ enum LeaveStatus {
   PENDING
   APPROVED
   REJECTED
+  CANCELLED
 }
 
 enum PolicyCategory {
@@ -69,6 +72,13 @@ model Employee {
   department     String
   region         String
   hourlyRate     Float
+  team           String             @default("Core Operations")
+  address        String             @default("Not Provided")
+  phone          String             @default("")
+  passwordHash   String?
+  isRegistered   Boolean            @default(false)
+  status         String             @default("PENDING_REGISTRATION")
+  joiningDate    DateTime           @default(now())
   createdAt      DateTime           @default(now())
   shifts         Shift[]
   punchLogs      PunchLog[]
@@ -116,6 +126,8 @@ model LeaveRequest {
   leaveType LeaveType
   reason    String
   status    LeaveStatus
+  hrNotes   String      @default("")
+  createdAt DateTime    @default(now())
   employee  Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId, startDate, endDate])
@@ -136,6 +148,42 @@ model PolicyRule {
   @@index([region])
 }
 
+model PolicyDocument {
+  id                      String   @id @default(cuid())
+  fileName                String
+  mimeType                String
+  region                  String   @default("ALL")
+  status                  String   @default("QUEUED")
+  progressPercent         Int      @default(0)
+  currentStep             String   @default("Queued for ingestion")
+  totalChunks             Int      @default(0)
+  processedChunks         Int      @default(0)
+  errorMessage            String?
+  rawExtractedText        String?
+  extractedCount          Int      @default(0)
+  extractedPolicyCodesJson Json
+  uploadedAt              DateTime @default(now())
+  chunks                  PolicyChunk[]
+
+  @@index([uploadedAt])
+  @@index([status])
+}
+
+model PolicyChunk {
+  id          String         @id @default(cuid())
+  documentId  String
+  document    PolicyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex  Int
+  sectionTitle String        @default("General Policy")
+  chunkText   String
+  region      String         @default("ALL")
+  tokenEstimate Int          @default(0)
+  createdAt   DateTime       @default(now())
+
+  @@index([documentId, chunkIndex])
+  @@index([region])
+}
+
 model TimecardException {
   id                     String            @id @default(cuid())
   employeeId             String
@@ -146,6 +194,9 @@ model TimecardException {
   deterministicDetailsJson Json
   aiProposalJson         Json?
   guardrailVerified      Boolean           @default(false)
+  resolvedBy             String?
+  resolvedAt             DateTime?
+  resolutionNotes        String?
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
   employee               Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)

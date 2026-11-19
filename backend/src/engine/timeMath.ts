@@ -4,7 +4,7 @@ export interface PunchInput {
   punchType: PunchType;
   timestamp: Date;
   date?: string;
-  source?: "BIOMETRIC" | "WEB_PORTAL" | "HR_MANUAL";
+  source?: "BIOMETRIC" | "WEB_PORTAL" | "HR_MANUAL" | "EMPLOYEE" | "HR_APPROVED";
 }
 
 export interface ShiftContext {

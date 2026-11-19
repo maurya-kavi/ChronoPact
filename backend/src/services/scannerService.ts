@@ -22,6 +22,9 @@ function netMinutes(punches: PunchInput[]): number {
 }
 
 export async function runFullTimecardScan(): Promise<{ scanned: number; createdOrUpdated: number }> {
+  const activePolicies = await prisma.policyRule.findMany({
+    select: { policyCode: true, thresholdJson: true },
+  });
   const employees = await prisma.employee.findMany({
     include: {
       shifts: { orderBy: [{ date: "asc" }, { scheduledStart: "asc" }] },
@@ -92,9 +95,18 @@ export async function runFullTimecardScan(): Promise<{ scanned: number; createdO
           : undefined,
       };
 
-      const anomalies = evaluateTimecard(punches, context);
+      const anomalies = evaluateTimecard(punches, context, activePolicies);
       scanned++;
       for (const anomaly of anomalies) {
+        const approvedExisting = await prisma.timecardException.findFirst({
+          where: {
+            employeeId: employee.id,
+            date: shift.date,
+            anomalyCode: anomaly.anomalyCode,
+            status: "APPROVED",
+          },
+        });
+        if (approvedExisting) continue;
         const existing = await prisma.timecardException.findFirst({
           where: { employeeId: employee.id, date: shift.date, anomalyCode: anomaly.anomalyCode, status: "OPEN" },
         });

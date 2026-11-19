@@ -7,6 +7,11 @@ import swaggerUi from "swagger-ui-express";
 import YAML from "yamljs";
 import { employeeRouter } from "./routes/employeeRoutes";
 import { hrRouter } from "./routes/hrRoutes";
+import { policiesRouter } from "./routes/policiesRoutes";
+import { authRouter } from "./routes/auth";
+import { employeesRouter } from "./routes/employees";
+import { punchesRouter } from "./routes/punches";
+import { leavesRouter } from "./routes/leaves";
 import { prisma } from "./lib/prisma";
 import { syncAllPoliciesToQdrant } from "./services/ragService";
 
@@ -24,8 +29,13 @@ app.get("/health", (_request: Request, response: Response) => {
 
 const openapiDocument = YAML.load(`${process.cwd()}/openapi.yaml`);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
-app.use(employeeRouter);
+app.use(authRouter);
+app.use(employeesRouter);
+app.use(punchesRouter);
+app.use(leavesRouter);
+app.use(policiesRouter);
 app.use(hrRouter);
+app.use(employeeRouter);
 
 app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
   if (error instanceof multer.MulterError) {

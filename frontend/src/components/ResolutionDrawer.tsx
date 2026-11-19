@@ -30,6 +30,7 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
   const [edited, setEdited] = useState<ProposedPunch[]>([]);
   const [policies, setPolicies] = useState<PolicyRule[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [reviewer, setReviewer] = useState("");
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
@@ -53,8 +54,8 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
 
   async function generate() {
     if (!exception) return;
-    setLoading(true);
     setMessage("");
+    setLoading(true);
     try {
       const result = await api<{
         aiProposalJson: NonNullable<ExceptionItem["aiProposalJson"]>;
@@ -65,6 +66,7 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
       setEdited(result.aiProposalJson.proposedPunches);
       setGuardrailVerified(result.guardrailVerified);
       setRemainingAnomalies(result.remainingAnomalies);
+      setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "AI proposal failed");
     } finally {
@@ -74,29 +76,28 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
 
   async function resolve(decision: "APPROVED" | "EDITED_AND_APPROVED" | "ESCALATED") {
     if (!exception) return;
-    if (!reviewer.trim()) {
-      setMessage("Reviewer name is required.");
-      return;
-    }
-    setLoading(true);
+    setMessage("");
+    setSubmitting(true);
     try {
       await api(`/exceptions/${exception.id}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           decision,
-          actionBy: reviewer,
+          actionBy: reviewer.trim() || "HR Admin",
+          reviewerName: reviewer.trim() || "HR Admin",
           citedPolicyCode: proposal?.citedPolicyCode,
           notes,
           editedPunches: decision === "EDITED_AND_APPROVED" ? edited : undefined,
         }),
       });
+      setMessage("");
       onResolved();
       onClose();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Resolution failed");
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
@@ -111,7 +112,7 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
         </div>
         <div className="space-y-5 p-6">
           {loading && <div className="flex items-center gap-2 rounded-lg bg-sky-50 px-4 py-3 text-sm text-sky-900"><RefreshCw className="animate-spin" size={16} /> Generating or resolving proposal...</div>}
-          {message && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{message}</div>}
+          {message && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{message}</div>}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="rounded-xl border border-slate-200 p-5">
@@ -135,7 +136,7 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
               <section className="rounded-xl border border-slate-200 p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div><h3 className="font-bold text-navy">AI Root-Cause Explanation</h3><p className="mt-2 text-sm leading-6 text-slate-600">{proposal.rootCauseExplanation}</p></div>
-                  <span className="rounded-full bg-navy px-3 py-1 text-xs font-bold text-white">{Math.round(proposal.confidenceScore * 100)}% confidence</span>
+                  <div className="flex flex-col items-end gap-1"><span className="rounded-full bg-navy px-3 py-1 text-xs font-bold text-white">{Math.round(proposal.confidenceScore * 100)}% confidence</span>{proposal.modelUsed && <span className="text-[11px] text-slate-500">Open-weight model: {proposal.modelUsed}</span>}</div>
                 </div>
               </section>
               <section className={`flex items-start gap-3 rounded-xl border p-4 ${guardrailVerified ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
@@ -158,9 +159,9 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
             <h3 className="font-bold text-navy">Human-in-the-Loop Decision</h3>
             <div className="mt-4 grid gap-3 md:grid-cols-2"><input value={reviewer} onChange={(event) => setReviewer(event.target.value)} placeholder="HR reviewer name" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" /><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Audit notes" className="rounded-lg border border-slate-300 px-3 py-2 text-sm md:row-span-1" /></div>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void resolve("APPROVED")} disabled={!proposal || loading} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Approve Proposal</button>
-              <button type="button" onClick={() => void resolve("EDITED_AND_APPROVED")} disabled={!proposal || loading} className="rounded-lg bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Save Edited Time and Approve</button>
-              <button type="button" onClick={() => void resolve("ESCALATED")} disabled={loading} className="rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800">Escalate to Senior HR</button>
+              <button type="button" onClick={() => void resolve("APPROVED")} disabled={!proposal || loading || submitting} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{submitting ? "Saving Decision..." : "Approve Proposal"}</button>
+              <button type="button" onClick={() => void resolve("EDITED_AND_APPROVED")} disabled={!proposal || loading || submitting} className="rounded-lg bg-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{submitting ? "Saving Decision..." : "Save Edited Time and Approve"}</button>
+              <button type="button" onClick={() => void resolve("ESCALATED")} disabled={loading || submitting} className="rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800">{submitting ? "Saving Decision..." : "Escalate to Senior HR"}</button>
             </div>
           </section>
         </div>

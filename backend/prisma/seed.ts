@@ -1,28 +1,29 @@
-import { PrismaClient, LeaveStatus, LeaveType, PolicyCategory, PunchSource, PunchType } from "@prisma/client";
+import { PrismaClient, LeaveStatus, PolicyCategory, PunchSource, PunchType } from "@prisma/client";
+import { randomBytes, scryptSync } from "crypto";
 
 const prisma = new PrismaClient();
 
 const employees = [
-  ["EMP-101", "Aarav Shah", "aarav.shah@example.com", "Engineer", "Engineering", "IN", 42],
-  ["EMP-102", "Priya Nair", "priya.nair@example.com", "Platform Engineer", "Engineering", "IN", 45],
-  ["EMP-103", "Vikram Rao", "vikram.rao@example.com", "QA Analyst", "Engineering", "IN", 38],
-  ["EMP-104", "Ananya Das", "ananya.das@example.com", "Security Analyst", "Engineering", "IN", 44],
-  ["EMP-105", "Rohan Mehta", "rohan.mehta@example.com", "DevOps Engineer", "Engineering", "US", 58],
-  ["EMP-106", "Mia Johnson", "mia.johnson@example.com", "Software Engineer", "Engineering", "US", 62],
-  ["EMP-107", "Liam Chen", "liam.chen@example.com", "Warehouse Associate", "Warehouse Ops", "US", 24],
-  ["EMP-108", "Noah Williams", "noah.williams@example.com", "Forklift Operator", "Warehouse Ops", "US", 27],
-  ["EMP-109", "Saanvi Iyer", "saanvi.iyer@example.com", "Inventory Coordinator", "Warehouse Ops", "IN", 23],
-  ["EMP-110", "Kabir Kapoor", "kabir.kapoor@example.com", "Dispatch Associate", "Warehouse Ops", "IN", 22],
-  ["EMP-111", "Ishaan Bose", "ishaan.bose@example.com", "Packing Lead", "Warehouse Ops", "IN", 25],
-  ["EMP-112", "Emma Davis", "emma.davis@example.com", "Customer Support Specialist", "Customer Support", "US", 26],
-  ["EMP-113", "Olivia Brown", "olivia.brown@example.com", "Support Team Lead", "Customer Support", "US", 32],
-  ["EMP-114", "Ethan Wilson", "ethan.wilson@example.com", "Support Specialist", "Customer Support", "US", 28],
-  ["EMP-115", "Meera Kulkarni", "meera.kulkarni@example.com", "Support Specialist", "Customer Support", "IN", 21],
-  ["EMP-116", "Aditya Singh", "aditya.singh@example.com", "Support Analyst", "Customer Support", "IN", 23],
-  ["EMP-117", "Sophia Martinez", "sophia.martinez@example.com", "Accountant", "Finance", "US", 36],
-  ["EMP-118", "James Miller", "james.miller@example.com", "Payroll Analyst", "Finance", "US", 39],
-  ["EMP-119", "Neha Gupta", "neha.gupta@example.com", "Financial Analyst", "Finance", "IN", 34],
-  ["EMP-120", "Arjun Malhotra", "arjun.malhotra@example.com", "Accounts Coordinator", "Finance", "IN", 31],
+  ["EMP001", "Aarav Shah", "aarav.shah@example.com", "Engineer", "Engineering", "IN", 42, "Platform Engineering", "12 MG Road, Bengaluru", "+91-9876543210"],
+  ["EMP002", "Priya Nair", "priya.nair@example.com", "Platform Engineer", "Engineering", "IN", 45, "Cloud Platform", "44 Marine Drive, Mumbai", "+91-9876543211"],
+  ["EMP003", "Vikram Rao", "vikram.rao@example.com", "QA Analyst", "Engineering", "IN", 38, "Quality Engineering", "8 Whitefield, Bengaluru", "+91-9876543212"],
+  ["EMP004", "Ananya Das", "ananya.das@example.com", "Security Analyst", "Engineering", "IN", 44, "Security Engineering", "21 Salt Lake, Kolkata", "+91-9876543213"],
+  ["EMP005", "Rohan Mehta", "rohan.mehta@example.com", "DevOps Engineer", "Engineering", "US", 58, "Infrastructure", "220 Broadway, New York", "+1-212-555-0105"],
+  ["EMP006", "Mia Johnson", "mia.johnson@example.com", "Software Engineer", "Engineering", "US", 62, "Product Engineering", "98 Market St, San Francisco", "+1-415-555-0106"],
+  ["EMP007", "Liam Chen", "liam.chen@example.com", "Warehouse Associate", "Warehouse Ops", "US", 24, "Inbound Operations", "310 King Ave, Austin", "+1-512-555-0107"],
+  ["EMP008", "Noah Williams", "noah.williams@example.com", "Forklift Operator", "Warehouse Ops", "US", 27, "Fulfillment", "77 Pine Ave, Dallas", "+1-214-555-0108"],
+  ["EMP009", "Saanvi Iyer", "saanvi.iyer@example.com", "Inventory Coordinator", "Warehouse Ops", "IN", 23, "Inventory Control", "5 Anna Nagar, Chennai", "+91-9876543218"],
+  ["EMP010", "Kabir Kapoor", "kabir.kapoor@example.com", "Dispatch Associate", "Warehouse Ops", "IN", 22, "Dispatch Operations", "18 Sector 17, Chandigarh", "+91-9876543219"],
+  ["EMP011", "Ishaan Bose", "ishaan.bose@example.com", "Packing Lead", "Warehouse Ops", "IN", 25, "Packing Operations", "33 Park Street, Kolkata", "+91-9876543220"],
+  ["EMP012", "Emma Davis", "emma.davis@example.com", "Customer Support Specialist", "Customer Support", "US", 26, "Tier 1 Support", "41 State St, Boston", "+1-617-555-0112"],
+  ["EMP013", "Olivia Brown", "olivia.brown@example.com", "Support Team Lead", "Customer Support", "US", 32, "Support Operations", "640 Madison Ave, New York", "+1-212-555-0113"],
+  ["EMP014", "Ethan Wilson", "ethan.wilson@example.com", "Support Specialist", "Customer Support", "US", 28, "Technical Support", "155 Peachtree St, Atlanta", "+1-404-555-0114"],
+  ["EMP015", "Meera Kulkarni", "meera.kulkarni@example.com", "Support Specialist", "Customer Support", "IN", 23, "Customer Care", "9 FC Road, Pune", "+91-9876543224"],
+  ["EMP016", "Aditya Singh", "aditya.singh@example.com", "Support Analyst", "Customer Support", "IN", 23, "Helpdesk", "27 Gomti Nagar, Lucknow", "+91-9876543225"],
+  ["EMP017", "Sophia Martinez", "sophia.martinez@example.com", "Accountant", "Finance", "US", 36, "Accounting", "95 Loop St, Chicago", "+1-312-555-0117"],
+  ["EMP018", "James Miller", "james.miller@example.com", "Payroll Analyst", "Finance", "US", 39, "Payroll Operations", "12 Congress Ave, Austin", "+1-512-555-0118"],
+  ["EMP019", "Neha Gupta", "neha.gupta@example.com", "Financial Analyst", "Finance", "IN", 34, "FP&A", "4 DLF Phase 3, Gurgaon", "+91-9876543228"],
+  ["EMP020", "Arjun Malhotra", "arjun.malhotra@example.com", "Accounts Coordinator", "Finance", "IN", 31, "Accounts Payable", "62 Banjara Hills, Hyderabad", "+91-9876543229"],
 ] as const;
 
 const policyRules: Array<{
@@ -47,6 +48,12 @@ function isoAt(date: string, hour: number, minute = 0): Date {
   return new Date(`${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00.000Z`);
 }
 
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const derived = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt:${salt}:${derived}`;
+}
+
 async function main() {
   await prisma.auditLog.deleteMany();
   await prisma.timecardException.deleteMany();
@@ -58,9 +65,24 @@ async function main() {
 
   await prisma.policyRule.createMany({ data: policyRules });
   const createdEmployees = [];
-  for (const [empCode, name, email, role, department, region, hourlyRate] of employees) {
+  for (let index = 0; index < employees.length; index++) {
+    const [empCode, name, email, role, department, region, hourlyRate, team, address, phone] = employees[index];
     createdEmployees.push(await prisma.employee.create({
-      data: { empCode, name, email, role, department, region, hourlyRate },
+      data: {
+        empCode,
+        name,
+        email,
+        role,
+        department,
+        region,
+        hourlyRate,
+        team,
+        address,
+        phone,
+        isRegistered: index < 2,
+        passwordHash: index < 2 ? hashPassword("Pass@123") : null,
+        status: index < 2 ? "ACTIVATED" : "PENDING_REGISTRATION",
+      },
     }));
   }
 
@@ -158,3 +180,15 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+
+
+
+
+
+
+
+
+
+
+
+  
