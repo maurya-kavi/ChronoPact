@@ -184,12 +184,13 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
       const shift = shifts.find((item) => item.date === date);
       const dayPunches = punches.filter((punch) => punch.date === date).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       const leave = leaves.find((item) => item.status === "APPROVED" && date >= item.startDate && date <= item.endDate);
-      const unresolvedException = exceptions.find(
+      const activeExceptions = exceptions.filter(
         (item) => item.date === date && ["OPEN", "PROPOSED", "ESCALATED"].includes(item.status),
       );
-      const approvedException = exceptions.find(
-        (item) => item.date === date && item.status === "APPROVED",
+      const resolvedExceptions = exceptions.filter(
+        (item) => item.date === date && ["APPROVED", "EDITED_AND_APPROVED"].includes(item.status),
       );
+      const unresolvedException = activeExceptions[0] ?? null;
       const firstIn = dayPunches.find((punch) => punch.punchType === "IN");
       const lastOut = [...dayPunches].reverse().find((punch) => punch.punchType === "OUT");
       let netMinutes = 0;
@@ -211,7 +212,7 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
         ? Number((expectedHours - netWorkedHours).toFixed(2))
         : 0;
       let status = "CLEAN";
-      if (approvedException && !unresolvedException) status = "RESOLVED";
+      if (activeExceptions.length === 0 && resolvedExceptions.length > 0) status = "RESOLVED";
       else if (leave) status = "ON_LEAVE";
       else if (!firstIn || (firstIn && !lastOut)) status = "MISSING_PUNCH";
       else if (unresolvedException) status = "EXCEPTION_FLAGGED";

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CalendarDays, Coffee, Clock3, LogIn, LogOut, Send } from "lucide-react";
 import { api, type Employee, type LeaveRequest, type Punch, type Shift } from "../api";
+import { formatIstTime } from "../utils/istTime";
 
 type Dashboard = {
   employee: Employee;
@@ -123,7 +124,7 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
           {dashboard?.todayShift && (
             <div className="mt-5 rounded-xl bg-navy p-5 text-white">
               <p className="text-sm text-slate-300">Today’s shift</p>
-              <p className="mt-2 text-2xl font-bold">{new Date(dashboard.todayShift.scheduledStart).getUTCHours().toString().padStart(2, "0")}:{String(new Date(dashboard.todayShift.scheduledStart).getUTCMinutes()).padStart(2, "0")} UTC - {new Date(dashboard.todayShift.scheduledEnd).getUTCHours().toString().padStart(2, "0")}:{String(new Date(dashboard.todayShift.scheduledEnd).getUTCMinutes()).padStart(2, "0")} UTC</p>
+              <p className="mt-2 text-2xl font-bold">{formatIstTime(dashboard.todayShift.scheduledStart)} - {formatIstTime(dashboard.todayShift.scheduledEnd)}</p>
               <p className="mt-2 text-sm">{dashboard.todayShift.expectedMinutes / 60} expected hours · {dashboard.todayShift.isWeeklyOff ? "Weekly off" : "Compliant schedule"}</p>
             </div>
           )}
@@ -175,7 +176,7 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
           <h2 className="flex items-center gap-2 font-bold text-navy"><Clock3 size={18} /> Daily Activity Log</h2>
           <div className="mt-4 space-y-2">
             {todayPunches.map((item) => (
-              <div key={item.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className="font-semibold">{item.punchType}</span><span>{String(new Date(item.timestamp).getUTCHours()).padStart(2, "0")}:{String(new Date(item.timestamp).getUTCMinutes()).padStart(2, "0")} UTC</span></div>
+              <div key={item.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span className="font-semibold">{item.punchType}</span><span>{formatIstTime(item.timestamp)}</span></div>
             ))}
             {todayPunches.length === 0 && <p className="text-sm text-slate-500">No punches recorded today.</p>}
           </div>

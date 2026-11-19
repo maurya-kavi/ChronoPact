@@ -55,7 +55,7 @@ hrRouter.post("/api/exceptions/scan", async (_request, response, next) => {
 
 hrRouter.get("/api/exceptions", async (request, response, next) => {
   try {
-    const status = z.enum(["UNRESOLVED", "OPEN", "PROPOSED", "APPROVED", "ESCALATED", "ALL"]).optional().safeParse(request.query.status);
+    const status = z.enum(["UNRESOLVED", "OPEN", "PROPOSED", "ESCALATED", "APPROVED", "ALL"]).optional().safeParse(request.query.status);
     const severity = z.enum(["HIGH", "MEDIUM", "LOW"]).optional().safeParse(request.query.severity);
     if (!status.success || !severity.success) return response.status(400).json({ error: "Invalid status or severity filter" });
     const date = typeof request.query.date === "string" ? z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(request.query.date) : undefined;
@@ -66,11 +66,13 @@ hrRouter.get("/api/exceptions", async (request, response, next) => {
 
     const exceptions = await prisma.timecardException.findMany({
       where: {
-        ...(status.data === "UNRESOLVED"
+        ...(status.data === "UNRESOLVED" || !status.data
           ? { status: { in: ["OPEN", "PROPOSED", "ESCALATED"] as const } }
-          : status.data && status.data !== "ALL"
-            ? { status: status.data as "OPEN" | "PROPOSED" | "APPROVED" | "ESCALATED" }
-            : {}),
+          : status.data === "APPROVED"
+            ? { status: { in: ["APPROVED"] as const } }
+            : status.data === "ALL"
+              ? {}
+              : { status: status.data as "OPEN" | "PROPOSED" | "ESCALATED" }),
         ...(severity.data ? { severity: severity.data } : {}),
         ...(employeeId ? { employeeId } : {}),
         ...(date?.data ? { date: date.data } : {}),
@@ -154,17 +156,16 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
       || parsed.data.actionBy?.trim()
       || "HR Admin";
     const auditNotes = parsed.data.notes ?? "";
-    const result = await prisma.$transaction(async (tx) => {
-      const exception = await tx.timecardException.findUnique({
-        where: { id: request.params.id },
-        include: { employee: true },
-      });
-      if (!exception) return null;
+    const exception = await prisma.timecardException.findUnique({
+      where: { id: request.params.id },
+      include: { employee: true },
+    });
+    if (!exception) return response.status(404).json({ error: "Timecard exception not found" });
 
-      const beforePunches = await tx.punchLog.findMany({
-        where: { employeeId: exception.employeeId, date: exception.date },
-        orderBy: { timestamp: "asc" },
-      });
+    const beforePunches = await prisma.punchLog.findMany({
+      where: { employeeId: exception.employeeId, date: exception.date },
+      orderBy: { timestamp: "asc" },
+    });
       let finalPunches = parsed.data.editedPunches;
       if (!finalPunches?.length && parsed.data.decision !== "ESCALATED") {
         const proposal = exception.aiProposalJson as
@@ -175,21 +176,23 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
 
       let afterPunches = beforePunches;
       const targetStatus = parsed.data.decision === "ESCALATED" ? "ESCALATED" : "APPROVED";
-      if (targetStatus === "APPROVED" && finalPunches?.length) {
-        const chronological = [...finalPunches].sort((a, b) => a.isoTimestamp.localeCompare(b.isoTimestamp));
-        await tx.punchLog.deleteMany({
+      if (targetStatus === "APPROVED") {
+        const chronological = (finalPunches ?? []).sort((a, b) => a.isoTimestamp.localeCompare(b.isoTimestamp));
+        await prisma.punchLog.deleteMany({
           where: { employeeId: exception.employeeId, date: exception.date },
         });
-        await tx.punchLog.createMany({
-          data: chronological.map((punch) => ({
-            employeeId: exception.employeeId,
-            date: exception.date,
-            punchType: punch.punchType,
-            timestamp: new Date(punch.isoTimestamp),
-            source: "HR_APPROVED" as const,
-          })),
-        });
-        afterPunches = await tx.punchLog.findMany({
+        if (chronological.length) {
+          await prisma.punchLog.createMany({
+            data: chronological.map((punch) => ({
+              employeeId: exception.employeeId,
+              date: exception.date,
+              punchType: punch.punchType,
+              timestamp: new Date(punch.isoTimestamp),
+              source: "HR_APPROVED" as const,
+            })),
+          });
+        }
+        afterPunches = await prisma.punchLog.findMany({
           where: { employeeId: exception.employeeId, date: exception.date },
           orderBy: { timestamp: "asc" },
         });
@@ -200,7 +203,7 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
         ?? proposal?.citedPolicyCode
         ?? exception.anomalyCode;
       const resolvedAt = new Date();
-      const updatedException = await tx.timecardException.update({
+      const updatedException = await prisma.timecardException.update({
         where: { id: exception.id },
         data: {
           status: targetStatus,
@@ -209,7 +212,23 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
           resolutionNotes: auditNotes,
         },
       });
-      const auditLog = await tx.auditLog.create({
+      if (targetStatus === "APPROVED") {
+        await prisma.timecardException.updateMany({
+          where: {
+            employeeId: exception.employeeId,
+            date: exception.date,
+            id: { not: exception.id },
+            status: { in: ["OPEN", "PROPOSED", "ESCALATED"] },
+          },
+          data: {
+            status: "APPROVED",
+            resolvedBy: reviewerName,
+            resolvedAt,
+            resolutionNotes: auditNotes,
+          },
+        });
+      }
+      const auditLog = await prisma.auditLog.create({
         data: {
           exceptionId: exception.id,
           employeeId: exception.employeeId,
@@ -221,10 +240,7 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
           notes: auditNotes,
         },
       });
-      return { exception: updatedException, auditLog };
-    });
-    if (!result) return response.status(404).json({ error: "Timecard exception not found" });
-    response.status(200).json(result);
+      response.status(200).json({ exception: updatedException, auditLog });
   } catch (error) {
     next(error);
   }

@@ -1,21 +1,8 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCw, X } from "lucide-react";
 import { api, type ExceptionItem, type PolicyRule, type ProposedPunch } from "../api";
+import { formatIstTime, toIstDatetimeLocalInput, fromIstDatetimeLocalInput } from "../utils/istTime";
 
-function formatUtcTime(isoTimestamp: string): string {
-  const date = new Date(isoTimestamp);
-  if (Number.isNaN(date.getTime())) return "--";
-  return `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")} UTC`;
-}
-
-function toUtcDatetimeLocal(isoTimestamp: string): string {
-  return isoTimestamp.slice(0, 16);
-}
-
-function fromUtcDatetimeLocal(value: string): string {
-  const normalized = value.length === 16 ? `${value}:00.000Z` : value.endsWith("Z") ? value : `${value}Z`;
-  return normalized;
-}
 
 interface Props {
   exception: ExceptionItem | null;
@@ -147,9 +134,9 @@ export default function ResolutionDrawer({ exception, onClose, onResolved }: Pro
               </section>
 
               <section className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-navy">Before</h3><div className="mt-3 space-y-2">{exception.punches.map((punch) => <div key={punch.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span>{punch.punchType}</span><span>{formatUtcTime(punch.timestamp)}</span></div>)}</div></div>
+                <div className="rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-navy">Before</h3><div className="mt-3 space-y-2">{exception.punches.map((punch) =>                 <div key={punch.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm"><span>{punch.punchType}</span><span>{formatIstTime(punch.timestamp)}</span></div>)}</div></div>
                 <div className="rounded-xl border border-slate-200 p-5"><div className="flex justify-between"><h3 className="font-bold text-navy">After</h3><button type="button" onClick={() => void generate()} className="flex items-center gap-1 text-xs font-bold text-teal"><RefreshCw size={14} /> Re-run AI Proposal</button></div><div className="mt-3 space-y-2">{edited.map((punch, index) => (
-                  <label key={`${punch.punchType}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-teal/5 px-3 py-2 text-sm"><span className="font-semibold">{punch.punchType}</span><input type="datetime-local" value={toUtcDatetimeLocal(punch.isoTimestamp)} onChange={(event) => setEdited((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, isoTimestamp: fromUtcDatetimeLocal(event.target.value) } : item))} className="rounded border border-slate-300 px-2 py-1" /></label>
+                  <label key={`${punch.punchType}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-teal/5 px-3 py-2 text-sm"><span className="font-semibold">{punch.punchType}</span><input type="datetime-local" value={toIstDatetimeLocalInput(punch.isoTimestamp)} onChange={(event) => setEdited((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, isoTimestamp: fromIstDatetimeLocalInput(event.target.value) } : item))} className="rounded border border-slate-300 px-2 py-1" /></label>
                 ))}</div></div>
               </section>
             </>

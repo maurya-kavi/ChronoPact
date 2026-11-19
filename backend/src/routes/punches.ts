@@ -95,7 +95,7 @@ punchesRouter.post("/api/punches", async (request, response, next) => {
       );
       flaggedAnomalies = anomalies.map((anomaly) => anomaly.anomalyCode);
       for (const anomaly of anomalies) {
-        const approvedExisting = await prisma.timecardException.findFirst({
+        const resolvedExisting = await prisma.timecardException.findFirst({
           where: {
             employeeId: parsed.data.employeeId,
             date,
@@ -103,7 +103,7 @@ punchesRouter.post("/api/punches", async (request, response, next) => {
             status: "APPROVED",
           },
         });
-        if (approvedExisting) continue;
+        if (resolvedExisting) continue;
         const existing = await prisma.timecardException.findFirst({
           where: { employeeId: parsed.data.employeeId, date, anomalyCode: anomaly.anomalyCode, status: "OPEN" },
         });

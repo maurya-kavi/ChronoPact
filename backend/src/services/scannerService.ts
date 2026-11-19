@@ -98,7 +98,7 @@ export async function runFullTimecardScan(): Promise<{ scanned: number; createdO
       const anomalies = evaluateTimecard(punches, context, activePolicies);
       scanned++;
       for (const anomaly of anomalies) {
-        const approvedExisting = await prisma.timecardException.findFirst({
+        const resolvedExisting = await prisma.timecardException.findFirst({
           where: {
             employeeId: employee.id,
             date: shift.date,
@@ -106,7 +106,7 @@ export async function runFullTimecardScan(): Promise<{ scanned: number; createdO
             status: "APPROVED",
           },
         });
-        if (approvedExisting) continue;
+        if (resolvedExisting) continue;
         const existing = await prisma.timecardException.findFirst({
           where: { employeeId: employee.id, date: shift.date, anomalyCode: anomaly.anomalyCode, status: "OPEN" },
         });
