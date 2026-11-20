@@ -24,14 +24,19 @@ export default function App() {
     api<{ role: "EMPLOYEE" | "HR_ADMIN"; profile: Session["profile"] }>("/auth/me")
       .then((result) => {
         setSession({ role: result.role, profile: result.profile });
+        localStorage.setItem("chronopact_role", result.role);
         setView(result.role === "HR_ADMIN" ? "hr" : "employee");
       })
-      .catch(() => localStorage.removeItem("chronopact_token"))
+      .catch(() => {
+        localStorage.removeItem("chronopact_token");
+        localStorage.removeItem("chronopact_role");
+      })
       .finally(() => setLoading(false));
   }, []);
 
   function logout() {
     localStorage.removeItem("chronopact_token");
+    localStorage.removeItem("chronopact_role");
     setSession(null);
   }
 
@@ -57,7 +62,7 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-8">
-        {session.role === "EMPLOYEE" || view === "employee" ? <EmployeePortal forcedEmployeeId={employeeProfile?.id} /> : <HrDashboard />}
+        {session.role === "EMPLOYEE" || view === "employee" ? <EmployeePortal forcedEmployeeId={employeeProfile?.id} isHrPreview={session.role === "HR_ADMIN"} /> : <HrDashboard />}
       </main>
     </div>
   );

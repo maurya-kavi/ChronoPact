@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CalendarDays, Coffee, Clock3, LogIn, LogOut, Send } from "lucide-react";
-import { api, type Employee, type LeaveRequest, type Punch, type Shift } from "../api";
+import { api, isHrAdminSession, type Employee, type LeaveRequest, type Punch, type Shift } from "../api";
 import { formatIstTime } from "../utils/istTime";
 
 type Dashboard = {
@@ -17,15 +17,18 @@ const actions = [
   { type: "OUT", label: "Clock Out", icon: LogOut },
 ] as const;
 
-export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?: string } = {}) {
+export default function EmployeePortal({ forcedEmployeeId, isHrPreview = false }: { forcedEmployeeId?: string; isHrPreview?: boolean } = {}) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [feedback, setFeedback] = useState("");
   const [flagged, setFlagged] = useState<string[]>([]);
   const [leave, setLeave] = useState({ leaveType: "CASUAL" as "SICK" | "CASUAL" | "EARNED", startDate: "", endDate: "", reason: "" });
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit" }).format(new Date()));
   const [attendance, setAttendance] = useState<any>(null);
+  const isReadOnlyPreview = isHrPreview || isHrAdminSession();
+  const todayParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const todayIst = `${todayParts.find((part) => part.type === "year")?.value}-${todayParts.find((part) => part.type === "month")?.value}-${todayParts.find((part) => part.type === "day")?.value}`;
 
   useEffect(() => {
     api<Employee[]>("/employees").then((items) => {
@@ -54,6 +57,7 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
   }
 
   async function punch(type: typeof actions[number]["type"]) {
+    if (isReadOnlyPreview) return;
     setFeedback("");
     setFlagged([]);
     try {
@@ -72,6 +76,12 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
 
   async function submitLeave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isReadOnlyPreview) return;
+    setFeedback("");
+    if (leave.startDate < todayIst || leave.endDate < leave.startDate) {
+      setFeedback("Leave cannot be requested for past dates. Please select today or a future date (IST).");
+      return;
+    }
     try {
       await api("/leaves", {
         method: "POST",
@@ -86,12 +96,11 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
     }
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todayPunches = dashboard?.recentPunches.filter((item) => item.date === today).sort((a, b) => a.timestamp.localeCompare(b.timestamp)) ?? [];
+  const todayPunches = dashboard?.recentPunches.filter((item) => item.date === todayIst).sort((a, b) => a.timestamp.localeCompare(b.timestamp)) ?? [];
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-navy">Active Date: {today} - Locked to Today</div>
+      <div className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-navy">Active Date: {todayIst} - Locked to Today (IST)</div>
       {feedback && <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">{feedback}</div>}
       {flagged.length > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
@@ -99,7 +108,7 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
         </div>
       )}
 
-      <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+      <section className={`grid gap-6 ${isReadOnlyPreview ? "grid-cols-1" : "xl:grid-cols-[1fr_1fr]"}`}>
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <label className="text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="employee">Employee profile</label>
           <select id="employee" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-3 text-sm">
@@ -130,7 +139,7 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
           )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {!isReadOnlyPreview && <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="font-bold text-navy">Live Action Punch Pad</h2>
           <div className="mt-4 grid grid-cols-2 gap-3">
             {actions.map(({ type, label, icon: Icon }) => (
@@ -139,7 +148,7 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
               </button>
             ))}
           </div>
-        </div>
+        </div>}
       </section>
 
       {attendance && (
@@ -154,23 +163,23 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
               ["Undertime Hours", attendance.summary.totalUndertimeHours],
             ].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs text-slate-500">{String(label)}</p><p className="mt-2 text-2xl font-bold text-navy">{String(value)}</p></div>)}
           </div>
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Shift</th><th className="px-4 py-3">Punches</th><th className="px-4 py-3">Worked</th><th className="px-4 py-3">OT / Undertime</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{attendance.dailyActivity.map((row: any) => <tr key={row.date} className="border-t border-slate-100"><td className="px-4 py-3">{row.date}</td><td className="px-4 py-3">{row.scheduledShift ? `${new Date(row.scheduledShift.scheduledStart).getUTCHours().toString().padStart(2, "0")}:${String(new Date(row.scheduledShift.scheduledStart).getUTCMinutes()).padStart(2, "0")} - ${new Date(row.scheduledShift.scheduledEnd).getUTCHours().toString().padStart(2, "0")}:${String(new Date(row.scheduledShift.scheduledEnd).getUTCMinutes()).padStart(2, "0")} UTC` : "No scheduled shift"}</td><td className="px-4 py-3">{row.punches.map((punch: Punch) => `${punch.punchType}@${String(new Date(punch.timestamp).getUTCHours()).padStart(2, "0")}:${String(new Date(punch.timestamp).getUTCMinutes()).padStart(2, "0")}`).join(", ") || "-"}</td><td className="px-4 py-3">{row.netWorkedHours}h</td><td className="px-4 py-3">{row.overtimeHours}h / {row.undertimeHours}h</td><td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{row.status}</span></td></tr>)}</tbody></table></div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Shift (IST)</th><th className="px-4 py-3">Punches (IST)</th><th className="px-4 py-3">Worked</th><th className="px-4 py-3">OT / Undertime</th><th className="px-4 py-3">Status</th></tr></thead><tbody>{attendance.dailyActivity.map((row: any) => <tr key={row.date} className="border-t border-slate-100"><td className="px-4 py-3">{row.date}</td><td className="px-4 py-3">{row.scheduledShift ? `${formatIstTime(row.scheduledShift.scheduledStart)} - ${formatIstTime(row.scheduledShift.scheduledEnd)}` : "No scheduled shift"}</td><td className="px-4 py-3">{row.punches.map((punch: Punch) => `${punch.punchType}@${formatIstTime(punch.timestamp)}`).join(", ") || "-"}</td><td className="px-4 py-3">{row.netWorkedHours}h</td><td className="px-4 py-3">{row.overtimeHours}h / {row.undertimeHours}h</td><td className="px-4 py-3">{row.status === "RESOLVED" || !row.exception || ["APPROVED", "EDITED_AND_APPROVED"].includes(row.exception.status) ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">Resolved</span> : <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{row.status}</span>}</td></tr>)}</tbody></table></div>
         </section>
       )}
 
-      <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-        <form onSubmit={submitLeave} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="flex items-center gap-2 font-bold text-navy"><CalendarDays size={18} /> Apply for Leave</h2>
+      <section className={`grid gap-6 ${isReadOnlyPreview ? "grid-cols-1" : "xl:grid-cols-[1fr_1fr]"}`}>
+        {!isReadOnlyPreview && <form onSubmit={submitLeave} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="flex items-center gap-2 font-bold text-navy"><CalendarDays size={18} /> Request Leave</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <select value={leave.leaveType} onChange={(event) => setLeave({ ...leave, leaveType: event.target.value as typeof leave.leaveType })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
               <option>SICK</option><option>CASUAL</option><option>EARNED</option>
             </select>
-            <input type="date" required value={leave.startDate} onChange={(event) => setLeave({ ...leave, startDate: event.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-            <input type="date" required value={leave.endDate} onChange={(event) => setLeave({ ...leave, endDate: event.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input type="date" required min={todayIst} value={leave.startDate} onChange={(event) => setLeave({ ...leave, startDate: event.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input type="date" required min={leave.startDate || todayIst} value={leave.endDate} onChange={(event) => setLeave({ ...leave, endDate: event.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
             <input type="text" required placeholder="Reason" value={leave.reason} onChange={(event) => setLeave({ ...leave, reason: event.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </div>
           <button type="submit" disabled={!employeeId} className="mt-4 rounded-lg bg-teal px-4 py-2 text-sm font-bold text-white">Submit Leave</button>
-        </form>
+        </form>}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="flex items-center gap-2 font-bold text-navy"><Clock3 size={18} /> Daily Activity Log</h2>
@@ -180,10 +189,8 @@ export default function EmployeePortal({ forcedEmployeeId }: { forcedEmployeeId?
             ))}
             {todayPunches.length === 0 && <p className="text-sm text-slate-500">No punches recorded today.</p>}
           </div>
-          <h3 className="mt-5 text-xs font-bold uppercase text-slate-500">Recent leave requests</h3>
-          {dashboard?.leaveRequests.slice(0, 4).map((item) => (
-            <div key={item.id} className="mt-2 flex justify-between text-sm"><span>{item.startDate} - {item.endDate}</span><span className="font-semibold">{item.status}</span></div>
-          ))}
+          <h3 className="mt-5 text-xs font-bold uppercase text-slate-500">Leave History</h3>
+            <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-xs"><thead className="text-slate-500"><tr><th className="py-2 pr-3">Dates</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">Status</th></tr></thead><tbody>{dashboard?.leaveRequests.map((item) => <tr key={item.id} className="border-t border-slate-100"><td className="py-2 pr-3">{item.startDate} – {item.endDate}</td><td className="py-2 pr-3">{item.leaveType}</td><td className="py-2 pr-3 font-semibold">{item.status}</td></tr>)}</tbody></table></div>
         </div>
       </section>
     </div>

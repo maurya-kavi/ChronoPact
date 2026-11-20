@@ -19,6 +19,51 @@ const resumeRawTextJobs = new Set<string>();
 let activeWorkers = 0;
 const concurrency = 2;
 
+function csvToReadableMarkdown(csv: string): string {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < csv.length; index++) {
+    const char = csv[index];
+    if (char === '"') {
+      if (quoted && csv[index + 1] === '"') {
+        cell += '"';
+        index++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && csv[index + 1] === "\n") index++;
+      row.push(cell.trim());
+      if (row.some((value) => value.length > 0)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some((value) => value.length > 0)) rows.push(row);
+  if (rows.length < 2) throw new Error("CSV policy must contain a header row and at least one data row");
+
+  const headers = rows[0].map((header, index) => header || `Column ${index + 1}`);
+  return [
+    "# Policy Data (CSV)",
+    `Columns: ${headers.join(" | ")}`,
+    ...rows.slice(1).map((values, rowIndex) => {
+      const fields = headers.map((header, columnIndex) => {
+        const value = (values[columnIndex] ?? "").replace(/\s+/g, " ").replace(/\|/g, "\\|");
+        return `${header}: ${value || "(blank)"}`;
+      });
+      return `## Row ${rowIndex + 1}\n${fields.map((field) => `- ${field}`).join("\n")}`;
+    }),
+  ].join("\n\n");
+}
+
 const ExtractedRuleSchema = z.object({
   policyCode: z.string().optional(),
   title: z.string().optional().default("Imported Policy Rule"),
@@ -34,6 +79,11 @@ async function updateDocument(documentId: string, data: Prisma.PolicyDocumentUnc
 
 async function extractMarkdown(document: { id: string; fileName: string; mimeType: string; rawExtractedText: string | null }): Promise<string> {
   if (document.rawExtractedText?.trim()) return document.rawExtractedText.trim();
+  if (/\.csv$/i.test(document.fileName)) {
+    const filePath = path.join(process.cwd(), "tmp_uploads", `${document.id}-${document.fileName}`);
+    const buffer = await fs.readFile(filePath);
+    return csvToReadableMarkdown(buffer.toString("utf8").replace(/^\uFEFF/, ""));
+  }
   if (/\.txt$/i.test(document.fileName) || /\.md$/i.test(document.fileName)) {
     const filePath = path.join(process.cwd(), "tmp_uploads", `${document.id}-${document.fileName}`);
     const buffer = await fs.readFile(filePath);
@@ -158,7 +208,9 @@ async function runJob(documentId: string, resumeFromRawText = false) {
             kind: "POLICY_CHUNK",
             chunkId: chunk.id,
             documentId,
+            documentName: document.fileName,
             fileName: document.fileName,
+            policyCode: null,
             region: document.region,
             chunkIndex: chunk.chunkIndex,
             sectionTitle: chunk.sectionTitle,
@@ -174,6 +226,7 @@ async function runJob(documentId: string, resumeFromRawText = false) {
     const batches = persistedChunks.length ? persistedChunks : [];
     for (let i = 0; i < batches.length; i += 2) {
       const batch = batches.slice(i, i + 2);
+      const batchPolicyCodes: string[] = [];
       const extracted = await extractRulesBatch(
         batch.map((chunk) => `## ${chunk.sectionTitle}\n${chunk.chunkText}`).join("\n\n").slice(0, 6500),
         document.region as "ALL" | "IN" | "US",
@@ -210,12 +263,19 @@ async function runJob(documentId: string, resumeFromRawText = false) {
             points: [{
               id: pointId,
               vector,
-              payload: { kind: "POLICY_RULE", policyId: policy.id, policyCode: policy.policyCode, title: policy.title, category: policy.category, region: policy.region, ruleText: policy.ruleText },
+              payload: { kind: "POLICY_RULE", policyId: policy.id, policyCode: policy.policyCode, documentId, documentName: document.fileName, title: policy.title, category: policy.category, region: policy.region, ruleText: policy.ruleText },
             }],
           });
           await prisma.policyRule.update({ where: { id: policy.id }, data: { qdrantPointId: pointId } });
         }
         policyCodes.add(policyCode);
+        batchPolicyCodes.push(policyCode);
+      }
+      if (batchPolicyCodes.length) {
+        await qdrant.setPayload(collectionName, {
+          payload: { policyCode: batchPolicyCodes[0] },
+          points: batch.map((chunk) => toValidQdrantUuid(chunk.id)),
+        });
       }
       await updateDocument(documentId, { processedChunks: Math.min(persistedChunks.length, i + 2) });
       await sleep(1500);

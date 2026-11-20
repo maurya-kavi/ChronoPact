@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FileUp, Search } from "lucide-react";
 import { api, type PolicyRule } from "../api";
 import type { PolicyDocumentHistory } from "./PolicyDocumentTypes";
+import { formatIstDateTime } from "../utils/istTime";
 
 export default function PolicyManager() {
   const [policies, setPolicies] = useState<PolicyRule[]>([]);
@@ -119,7 +120,7 @@ export default function PolicyManager() {
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="flex items-center gap-2 text-lg font-bold text-navy"><FileUp size={19} /> Policy Document Upload</h2>
         <div className="mt-4 flex flex-wrap items-end gap-3">
-          <input type="file" accept=".pdf,.docx,.txt" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <input type="file" accept=".pdf,.docx,.txt,.md,.csv" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           <select value={region} onChange={(event) => setRegion(event.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
             <option>ALL</option><option>IN</option><option>US</option>
           </select>
@@ -153,7 +154,7 @@ export default function PolicyManager() {
                 {document.status === "FAILED" && <div className="mt-2"><span className="rounded bg-red-100 px-2 py-1 text-xs font-bold text-red-700">FAILED</span><p className="mt-1 text-xs text-red-700">{document.errorMessage}</p><button type="button" onClick={() => void retryDocument(document.id)} className="mt-2 rounded-lg border border-red-300 px-2 py-1 text-xs font-bold text-red-700">Retry</button></div>}
                 {document.status === "DONE" && <span className="mt-2 inline-block rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">DONE</span>}
               </td>
-              <td className="px-4 py-3">{new Date(document.uploadedAt).toISOString().replace("T", " ").slice(0, 16)} UTC</td>
+              <td className="px-4 py-3">{formatIstDateTime(document.uploadedAt)}</td>
             </tr>
           ))}</tbody>
         </table>

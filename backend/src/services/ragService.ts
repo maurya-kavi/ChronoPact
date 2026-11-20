@@ -60,11 +60,97 @@ export async function ensurePolicyCollection(): Promise<boolean> {
       field_name: "category",
       field_schema: "keyword",
     }).catch(() => undefined);
+    await qdrant.createPayloadIndex(collectionName, {
+      field_name: "kind",
+      field_schema: "keyword",
+    }).catch(() => undefined);
+    await qdrant.createPayloadIndex(collectionName, {
+      field_name: "documentName",
+      field_schema: "keyword",
+    }).catch(() => undefined);
     return true;
   } catch (error) {
     console.warn("Qdrant unavailable; policy retrieval will use PostgreSQL fallback:", error instanceof Error ? error.message : error);
     return false;
   }
+}
+
+export interface PolicyChatContext {
+  documentName: string;
+  policyCode: string | null;
+  chunkText: string;
+  score: number;
+}
+
+const stopWords = new Set(["the", "and", "for", "with", "from", "that", "this", "what", "when", "where", "does", "are", "is", "how", "can", "will", "into", "during", "before", "after"]);
+
+function keywordScore(query: string, text: string): number {
+  const terms = [...new Set(query.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [])].filter((term) => !stopWords.has(term));
+  if (!terms.length) return 0;
+  const normalized = text.toLowerCase();
+  const matched = terms.filter((term) => normalized.includes(term)).length;
+  return matched / terms.length;
+}
+
+export async function retrievePolicyChatContext(question: string, documentName?: string): Promise<{
+  contexts: PolicyChatContext[];
+  qdrantChunksSearched: number;
+  usedPostgresFallback: boolean;
+}> {
+  try {
+    const available = await ensurePolicyCollection();
+    if (!available) throw new Error("Qdrant collection is unavailable");
+    const vector = await embedText(question);
+    const filter: { must: Array<Record<string, unknown>>; should?: Array<Record<string, unknown>> } = {
+      must: [{ key: "kind", match: { value: "POLICY_CHUNK" } }],
+    };
+    if (documentName && documentName !== "ALL") filter.should = [
+      { key: "documentName", match: { value: documentName } },
+      { key: "fileName", match: { value: documentName } },
+    ];
+    const result = await qdrant.query(collectionName, {
+      query: vector,
+      limit: 6,
+      with_payload: true,
+      filter: filter as never,
+    });
+    const contexts = (result.points ?? []).map((point) => ({
+      documentName: String(point.payload?.documentName ?? point.payload?.fileName ?? "Uploaded policy document"),
+      policyCode: typeof point.payload?.policyCode === "string" ? point.payload.policyCode : null,
+      chunkText: String(point.payload?.chunkText ?? ""),
+      score: Number(point.score ?? 0),
+    })).filter((context) => context.chunkText.trim());
+    return { contexts, qdrantChunksSearched: contexts.length, usedPostgresFallback: false };
+  } catch (error) {
+    console.warn("Qdrant policy chat retrieval failed; using PostgreSQL policy rules:", error instanceof Error ? error.message : error);
+  }
+
+  const documents = await prisma.policyDocument.findMany({
+    select: { fileName: true, extractedPolicyCodesJson: true },
+  });
+  const policyDocuments = new Map<string, string>();
+  for (const document of documents) {
+    if (documentName && documentName !== "ALL" && document.fileName !== documentName) continue;
+    const codes = Array.isArray(document.extractedPolicyCodesJson)
+      ? document.extractedPolicyCodesJson.filter((code): code is string => typeof code === "string")
+      : [];
+    for (const code of codes) policyDocuments.set(code, document.fileName);
+  }
+  const policies = await prisma.policyRule.findMany();
+  const contexts = policies.map((policy) => ({
+    policy,
+    score: keywordScore(question, `${policy.policyCode} ${policy.title} ${policy.ruleText}`),
+    documentName: policyDocuments.get(policy.policyCode),
+  })).filter((item) => item.score > 0 && item.documentName)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 6)
+    .map(({ policy, score, documentName: sourceDocument }) => ({
+      documentName: sourceDocument as string,
+      policyCode: policy.policyCode,
+      chunkText: `${policy.title}: ${policy.ruleText}`,
+      score,
+    }));
+  return { contexts, qdrantChunksSearched: 0, usedPostgresFallback: true };
 }
 
 export async function syncAllPoliciesToQdrant(): Promise<{ synced: number; available: boolean }> {

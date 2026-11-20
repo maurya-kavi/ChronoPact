@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { verifyToken } from "./auth";
+import { requireEmployeeSession } from "../middleware/employeeSession";
 
 export const leavesRouter = Router();
 
@@ -42,7 +43,7 @@ leavesRouter.get("/api/leaves", async (request, response, next) => {
   }
 });
 
-leavesRouter.post("/api/leaves", async (request, response, next) => {
+leavesRouter.post("/api/leaves", requireEmployeeSession, async (request, response, next) => {
   try {
     const parsed = z.object({
       employeeId: z.string().optional(),
@@ -52,15 +53,16 @@ leavesRouter.post("/api/leaves", async (request, response, next) => {
       reason: z.string().min(1),
     }).safeParse(request.body);
     if (!parsed.success) return response.status(400).json({ error: "Invalid leave request", details: parsed.error.flatten() });
+    const employeeId = response.locals.employeeId as string;
+    const todayParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(new Date());
+    const todayIst = `${todayParts.find((part) => part.type === "year")?.value}-${todayParts.find((part) => part.type === "month")?.value}-${todayParts.find((part) => part.type === "day")?.value}`;
+    if (parsed.data.startDate < todayIst) {
+      return response.status(400).json({ error: "Leave requests cannot be submitted for past dates. Please choose today or a future date (IST)." });
+    }
     if (parsed.data.endDate < parsed.data.startDate) return response.status(400).json({ error: "End date cannot be before start date" });
 
-    let employeeId = parsed.data.employeeId;
-    const header = request.headers.authorization;
-    if (!employeeId && header?.startsWith("Bearer ")) {
-      const payload = verifyToken(header.slice(7));
-      if (payload?.role === "EMPLOYEE") employeeId = String(payload.sub);
-    }
-    if (!employeeId) return response.status(400).json({ error: "employeeId is required" });
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
     if (!employee) return response.status(404).json({ error: "Employee not found" });
 

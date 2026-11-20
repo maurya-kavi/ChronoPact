@@ -7,13 +7,32 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { enqueuePolicyIngestion, retryPolicyIngestion } from "../services/policyIngestionWorker";
 import { deletePolicyFromQdrant, upsertPolicyToQdrant } from "../services/ragService";
+import { requireHrAdmin } from "../middleware/hrAdminAccess";
+import { answerPolicyQuestion } from "../services/policyChatService";
 
 export const policiesRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
+policiesRouter.post("/api/policies/chat", requireHrAdmin, async (request, response, next) => {
+  try {
+    const parsed = z.object({
+      question: z.string().trim().min(1).max(4000),
+      documentName: z.string().trim().optional(),
+      history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(20).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) return response.status(400).json({ error: "Invalid policy chat request", details: parsed.error.flatten() });
+    response.json(await answerPolicyQuestion(parsed.data));
+  } catch (error) {
+    next(error);
+  }
+});
+
 policiesRouter.post("/api/policies/upload", upload.single("file"), async (request, response, next) => {
   try {
     if (!request.file) return response.status(400).json({ error: "Policy file is required" });
+    if (!/\.(pdf|docx|txt|md|csv)$/i.test(request.file.originalname)) {
+      return response.status(400).json({ error: "Unsupported policy file. Upload a PDF, DOCX, TXT, MD, or CSV file." });
+    }
     const region = z.enum(["ALL", "IN", "US"]).parse(request.body.region ?? "ALL");
     await fs.mkdir(path.join(process.cwd(), "tmp_uploads"), { recursive: true });
     const document = await prisma.policyDocument.create({

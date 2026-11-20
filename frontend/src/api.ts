@@ -1,6 +1,14 @@
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000/api").replace(/\/$/, "");
+export const HR_PUNCH_FORBIDDEN_MESSAGE = "HR Admins are not permitted to clock in or clock out on behalf of employees. Flagged anomalies must be resolved through the audited Exception Resolution workflow.";
+
+export function isHrAdminSession(): boolean {
+  return localStorage.getItem("chronopact_role") === "HR_ADMIN";
+}
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  if (init?.method?.toUpperCase() === "POST" && /^\/(?:punches|employees\/[^/]+\/punches)(?:\?|$)/.test(path) && isHrAdminSession()) {
+    throw new Error(HR_PUNCH_FORBIDDEN_MESSAGE);
+  }
   const token = localStorage.getItem("chronopact_token");
   const headers = new Headers(init?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);

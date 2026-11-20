@@ -153,7 +153,7 @@ employeesRouter.patch("/api/employees/:id", async (request, response, next) => {
 employeesRouter.get("/api/employees/:id/report", async (request, response, next) => {
   try {
     const month = z.string().regex(/^\d{4}-\d{2}$/).catch(() => new Date().toISOString().slice(0, 7)).parse(request.query.month);
-    const statusFilter = z.enum(["ALL", "MISSING_PUNCH", "OVERTIME", "UNDERTIME", "ON_LEAVE", "EXCEPTION_FLAGGED", "CLEAN"]).catch("ALL").parse(request.query.statusFilter);
+    const statusFilter = z.enum(["ALL", "MISSING_PUNCH", "OVERTIME", "UNDERTIME", "ON_LEAVE", "EXCEPTION_FLAGGED", "RESOLVED", "CLEAN"]).catch("ALL").parse(request.query.statusFilter);
     const employee = await prisma.employee.findUnique({ where: { id: request.params.id } });
     if (!employee) return response.status(404).json({ error: "Employee not found" });
 
@@ -188,7 +188,7 @@ employeesRouter.get("/api/employees/:id/report", async (request, response, next)
         (item) => item.date === date && ["OPEN", "PROPOSED", "ESCALATED"].includes(item.status),
       );
       const resolvedExceptions = exceptions.filter(
-        (item) => item.date === date && ["APPROVED", "EDITED_AND_APPROVED"].includes(item.status),
+        (item) => item.date === date && item.status === "APPROVED",
       );
       const unresolvedException = activeExceptions[0] ?? null;
       const firstIn = dayPunches.find((punch) => punch.punchType === "IN");

@@ -55,9 +55,9 @@ hrRouter.post("/api/exceptions/scan", async (_request, response, next) => {
 
 hrRouter.get("/api/exceptions", async (request, response, next) => {
   try {
-    const status = z.enum(["UNRESOLVED", "OPEN", "PROPOSED", "ESCALATED", "APPROVED", "ALL"]).optional().safeParse(request.query.status);
+    const requestedStatus = typeof request.query.status === "string" ? request.query.status : undefined;
     const severity = z.enum(["HIGH", "MEDIUM", "LOW"]).optional().safeParse(request.query.severity);
-    if (!status.success || !severity.success) return response.status(400).json({ error: "Invalid status or severity filter" });
+    if (!severity.success) return response.status(400).json({ error: "Invalid severity filter" });
     const date = typeof request.query.date === "string" ? z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(request.query.date) : undefined;
     const month = typeof request.query.month === "string" ? z.string().regex(/^\d{4}-\d{2}$/).safeParse(request.query.month) : undefined;
     const employeeId = typeof request.query.employeeId === "string" ? request.query.employeeId : undefined;
@@ -66,13 +66,9 @@ hrRouter.get("/api/exceptions", async (request, response, next) => {
 
     const exceptions = await prisma.timecardException.findMany({
       where: {
-        ...(status.data === "UNRESOLVED" || !status.data
-          ? { status: { in: ["OPEN", "PROPOSED", "ESCALATED"] as const } }
-          : status.data === "APPROVED"
-            ? { status: { in: ["APPROVED"] as const } }
-            : status.data === "ALL"
-              ? {}
-              : { status: status.data as "OPEN" | "PROPOSED" | "ESCALATED" }),
+        status: requestedStatus === "OPEN" || requestedStatus === "PROPOSED" || requestedStatus === "ESCALATED"
+          ? requestedStatus
+          : { in: ["OPEN", "PROPOSED", "ESCALATED"] as const },
         ...(severity.data ? { severity: severity.data } : {}),
         ...(employeeId ? { employeeId } : {}),
         ...(date?.data ? { date: date.data } : {}),
@@ -167,7 +163,7 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
       orderBy: { timestamp: "asc" },
     });
       let finalPunches = parsed.data.editedPunches;
-      if (!finalPunches?.length && parsed.data.decision !== "ESCALATED") {
+      if (parsed.data.decision === "APPROVED" && finalPunches === undefined) {
         const proposal = exception.aiProposalJson as
           | { proposedPunches?: Array<{ punchType: "IN" | "BREAK_START" | "BREAK_END" | "OUT"; isoTimestamp: string }> }
           | null;
@@ -176,7 +172,7 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
 
       let afterPunches = beforePunches;
       const targetStatus = parsed.data.decision === "ESCALATED" ? "ESCALATED" : "APPROVED";
-      if (targetStatus === "APPROVED") {
+      if (targetStatus !== "ESCALATED") {
         const chronological = (finalPunches ?? []).sort((a, b) => a.isoTimestamp.localeCompare(b.isoTimestamp));
         await prisma.punchLog.deleteMany({
           where: { employeeId: exception.employeeId, date: exception.date },
@@ -212,16 +208,16 @@ hrRouter.post("/api/exceptions/:id/resolve", async (request, response, next) => 
           resolutionNotes: auditNotes,
         },
       });
-      if (targetStatus === "APPROVED") {
+      if (targetStatus !== "ESCALATED") {
         await prisma.timecardException.updateMany({
           where: {
             employeeId: exception.employeeId,
             date: exception.date,
             id: { not: exception.id },
-            status: { in: ["OPEN", "PROPOSED", "ESCALATED"] },
+            status: { in: ["OPEN", "PROPOSED"] },
           },
           data: {
-            status: "APPROVED",
+            status: targetStatus,
             resolvedBy: reviewerName,
             resolvedAt,
             resolutionNotes: auditNotes,

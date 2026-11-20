@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { api, type AuditRecord } from "../api";
+import { formatIstDateTime } from "../utils/istTime";
 
 export default function AuditLogView() {
   const [records, setRecords] = useState<AuditRecord[]>([]);
@@ -34,7 +35,7 @@ export default function AuditLogView() {
           <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Employee</th><th className="px-4 py-3">Decision</th><th className="px-4 py-3">Cited Policy</th><th className="px-4 py-3">Before / After</th><th className="px-4 py-3">Approved By</th><th className="px-4 py-3">Notes</th></tr></thead>
           <tbody>{records.map((record) => (
             <tr key={record.id} className="border-t border-slate-100">
-              <td className="px-4 py-3">{new Date(record.createdAt).toISOString().replace("T", " ").slice(0, 16)} UTC</td>
+              <td className="px-4 py-3">{formatIstDateTime(record.createdAt)}</td>
               <td className="px-4 py-3 font-semibold">{record.employee?.name} <span className="text-slate-400">({record.employee?.empCode})</span></td>
               <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold">{record.decision}</span></td>
               <td className="px-4 py-3">{record.citedPolicyCode}</td>

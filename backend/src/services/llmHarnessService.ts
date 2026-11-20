@@ -90,6 +90,13 @@ function netMinutes(punches: PunchInput[]): number {
   return Math.max(0, Math.round(gross));
 }
 
+function formatIst(date: Date): string {
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: true,
+  }).format(date) + " IST";
+}
+
 export async function generateExceptionProposal(exceptionId: string): Promise<{
   proposal: TimecardProposal;
   guardrailVerified: boolean;
@@ -101,7 +108,7 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
   });
   if (!exception) throw new Error("Timecard exception not found");
 
-  const [shift, punchLogs, approvedLeaves, priorShifts] = await Promise.all([
+  const [shift, punchLogs, approvedLeaves, priorShifts, dayExceptions] = await Promise.all([
     prisma.shift.findFirst({ where: { employeeId: exception.employeeId, date: exception.date } }),
     prisma.punchLog.findMany({
       where: { employeeId: exception.employeeId, date: exception.date },
@@ -114,6 +121,10 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
       where: { employeeId: exception.employeeId, date: { lt: exception.date } },
       orderBy: { date: "desc" },
       take: 7,
+    }),
+    prisma.timecardException.findMany({
+      where: { employeeId: exception.employeeId, date: exception.date, status: { in: ["OPEN", "PROPOSED", "ESCALATED"] } },
+      select: { anomalyCode: true },
     }),
   ]);
   if (!shift) throw new Error("No scheduled shift found for this exception");
@@ -202,6 +213,7 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
 
   let lastValidationError: string | undefined;
   let proposal: TimecardProposal | undefined;
+  let verifiedSimulation: ReturnType<typeof simulateAndVerifyFix> | undefined;
   let modelUsed = process.env.LLM_MODEL || "openai/gpt-oss-120b";
   const fallbackModel = process.env.LLM_EVAL_MODEL || "openai/gpt-oss-20b";
   const exactJsonContract = [
@@ -229,16 +241,20 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
         messages: [
         {
           role: "system",
-          content: `${exactJsonContract}\nFor UNAPPROVED_DAILY_OVERTIME when punches are valid and approval is needed, preserve existing punches and use FLAG_FOR_OVERTIME_APPROVAL. Never calculate time or invent facts.`,
+          content: `${exactJsonContract}\nFor UNAPPROVED_DAILY_OVERTIME when punches are valid and approval is needed, preserve existing punches and use FLAG_FOR_OVERTIME_APPROVAL. For PUNCH_ON_APPROVED_LEAVE, use REJECT_INVALID_PUNCH with proposedPunches exactly []. For SHIFT_WINDOW_MISMATCH, MISSED_CLOCK_OUT, MISSING_MANDATORY_MEAL_BREAK, or OPEN_BREAK_PUNCH, return a complete valid full-day sequence aligned to the assigned shift start and end and include a 30-minute BREAK_START/BREAK_END pair if duration exceeds 5 hours. Never calculate time or invent facts.`,
         },
         {
           role: "user",
           content: [
             `Exception: ${exception.anomalyCode}`,
+            `All active anomalies on this date: ${dayExceptions.map((item) => item.anomalyCode).join(", ")}`,
             `Deterministic facts: ${JSON.stringify(deterministicDetails)}`,
             `Existing punches: ${JSON.stringify(punches.map((p) => ({ punchType: p.punchType, isoTimestamp: p.timestamp.toISOString() })))}`,
-            `Shift: ${JSON.stringify({ scheduledStart: shift.scheduledStart.toISOString(), scheduledEnd: shift.scheduledEnd.toISOString(), date: shift.date })}`,
-            `Employee context: ${JSON.stringify({ empCode: exception.employee.empCode, name: exception.employee.name, department: exception.employee.department, team: exception.employee.team, role: exception.employee.role, region: exception.employee.region, shiftStart: shift.scheduledStart.toISOString(), shiftEnd: shift.scheduledEnd.toISOString() })}`,
+            `Shift: ${JSON.stringify({ scheduledStartUtc: shift.scheduledStart.toISOString(), scheduledStartIst: formatIst(shift.scheduledStart), scheduledEndUtc: shift.scheduledEnd.toISOString(), scheduledEndIst: formatIst(shift.scheduledEnd), date: shift.date })}`,
+            `Employee context: ${JSON.stringify({ empCode: exception.employee.empCode, name: exception.employee.name, department: exception.employee.department, team: exception.employee.team, role: exception.employee.role, region: exception.employee.region, shiftStartUtc: shift.scheduledStart.toISOString(), shiftStartIst: formatIst(shift.scheduledStart), shiftEndUtc: shift.scheduledEnd.toISOString(), shiftEndIst: formatIst(shift.scheduledEnd) })}`,
+            dayExceptions.some((item) => item.anomalyCode === "PUNCH_ON_APPROVED_LEAVE")
+              ? "PUNCH_ON_APPROVED_LEAVE is present: set proposedActionType to REJECT_INVALID_PUNCH, proposedPunches to exactly [], and explain punches on approved leave must be voided or HR must cancel the leave first."
+              : "",
             "Return proposedPunches as the complete employee-date punch sequence in chronological order, not as a replacement for only the anomalous punch.",
             "Preserve valid existing punches. For durations over 5 hours, ensure a 30-minute BREAK_START/BREAK_END pair exists.",
             exception.anomalyCode === "UNAPPROVED_DAILY_OVERTIME"
@@ -269,7 +285,7 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
             max_completion_tokens: 2048,
             messages: [
               { role: "system", content: `${exactJsonContract}\nNever calculate time or invent facts. Preserve existing punches for approval-only overtime.` },
-              { role: "user", content: `Return JSON now.\nException=${exception.anomalyCode}\nEmployee=${exception.employee.empCode},${exception.employee.team},${exception.employee.department}\nShift=${shift.scheduledStart.toISOString()}-${shift.scheduledEnd.toISOString()}\nPunches=${JSON.stringify(punches.map((p) => ({ punchType: p.punchType, isoTimestamp: p.timestamp.toISOString() })))}\nPolicies=${policyBlock}\nChunks=${chunkBlock}${lastValidationError ? `\nExact Zod validation error: ${lastValidationError}` : ""}` },
+              { role: "user", content: `Return JSON now.\nException=${exception.anomalyCode}\nActive date anomalies=${dayExceptions.map((item) => item.anomalyCode).join(", ")}\nEmployee=${exception.employee.empCode},${exception.employee.team},${exception.employee.department}\nShift UTC=${shift.scheduledStart.toISOString()}-${shift.scheduledEnd.toISOString()}\nShift IST=${formatIst(shift.scheduledStart)}-${formatIst(shift.scheduledEnd)}\n${dayExceptions.some((item) => item.anomalyCode === "PUNCH_ON_APPROVED_LEAVE") ? "PUNCH_ON_APPROVED_LEAVE requires REJECT_INVALID_PUNCH with proposedPunches=[] and an explanation that HR must void the punches or cancel leave first.\n" : ""}For shift mismatch, missed clock out, mandatory break, or open break anomalies, return a complete aligned full-day sequence and include a 30-minute break pair when shift duration exceeds 5 hours.\nPunches=${JSON.stringify(punches.map((p) => ({ punchType: p.punchType, isoTimestamp: p.timestamp.toISOString() })))}\nPolicies=${policyBlock}\nChunks=${chunkBlock}${lastValidationError ? `\nExact Zod validation or guardrail remainingAnomalies codes: ${lastValidationError}` : ""}` },
             ],
           });
         } catch (fallbackError) {
@@ -291,6 +307,17 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
       if (!orderedRules.some((rule) => rule.policyCode === parsed.data.citedPolicyCode)) {
         throw new Error(`citedPolicyCode "${parsed.data.citedPolicyCode}" is not in retrieved policy codes`);
       }
+      const candidatePunches = parsed.data.proposedPunches.map((p) => ({ punchType: p.punchType, timestamp: new Date(p.isoTimestamp) }));
+      const simulation = simulateAndVerifyFix(candidatePunches, baseContext, activePolicies, parsed.data.proposedActionType);
+      if (!simulation.isSafe) {
+        const codes = simulation.remainingAnomalies.map((item) => item.anomalyCode);
+        lastValidationError = `Guardrail remainingAnomalies codes: ${codes.join(", ")}`;
+        if (attempt < 2) continue;
+        verifiedSimulation = simulation;
+        proposal = { ...parsed.data, modelUsed };
+        break;
+      }
+      verifiedSimulation = simulation;
       proposal = { ...parsed.data, modelUsed };
       break;
     } catch (error) {
@@ -303,7 +330,7 @@ export async function generateExceptionProposal(exceptionId: string): Promise<{
     punchType: p.punchType,
     timestamp: new Date(p.isoTimestamp),
   }));
-  const simulationResult = simulateAndVerifyFix(proposedPunches, baseContext, activePolicies);
+  const simulationResult = verifiedSimulation ?? simulateAndVerifyFix(proposedPunches, baseContext, activePolicies, proposal.proposedActionType);
 
   const metadata: TimecardProposal = {
     ...proposal,

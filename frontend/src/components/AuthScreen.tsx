@@ -28,6 +28,7 @@ export default function AuthScreen({ onAuthenticated }: Props) {
         result = await api("/auth/hr-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hrEmail, password: hrPassword }) });
       }
       localStorage.setItem("chronopact_token", result.token);
+      localStorage.setItem("chronopact_role", result.role);
       onAuthenticated(result.role, result.employee);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Authentication failed");

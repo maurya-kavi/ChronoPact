@@ -5,6 +5,8 @@ import { prisma } from "../lib/prisma";
 import { evaluateTimecard } from "../engine/evaluator";
 import { LeaveContext, PunchInput, ShiftContext } from "../engine/timeMath";
 import { runFullTimecardScan } from "../services/scannerService";
+import { requireEmployeePunchAccess } from "../middleware/employeePunchAccess";
+import { requireEmployeeSession } from "../middleware/employeeSession";
 
 export const employeeRouter = Router();
 
@@ -93,7 +95,7 @@ employeeRouter.get("/api/employees/:id/dashboard", async (request, response, nex
   }
 });
 
-employeeRouter.post("/api/punches", async (request, response, next) => {
+employeeRouter.post("/api/punches", requireEmployeePunchAccess, async (request, response, next) => {
   try {
     const parsed = punchSchema.safeParse(request.body);
     if (!parsed.success) return response.status(400).json({ error: "Invalid punch", details: parsed.error.flatten() });
@@ -101,7 +103,7 @@ employeeRouter.post("/api/punches", async (request, response, next) => {
     const timestamp = new Date(parsed.data.timestamp);
     const date = timestamp.toISOString().slice(0, 10);
     const punch = await prisma.punchLog.create({
-      data: { employeeId: parsed.data.employeeId, date, punchType: parsed.data.punchType, timestamp, source: parsed.data.source },
+      data: { employeeId: parsed.data.employeeId, date, punchType: parsed.data.punchType, timestamp, source: "EMPLOYEE" },
     });
 
     const [shift, allPunches, leaves] = await Promise.all([
@@ -204,12 +206,17 @@ employeeRouter.post("/api/punches", async (request, response, next) => {
   }
 });
 
-employeeRouter.post("/api/leaves", async (request, response, next) => {
+employeeRouter.post("/api/leaves", requireEmployeeSession, async (request, response, next) => {
   try {
     const parsed = leaveSchema.safeParse(request.body);
     if (!parsed.success) return response.status(400).json({ error: "Invalid leave request", details: parsed.error.flatten() });
+    const employeeId = response.locals.employeeId as string;
+    const dateParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const todayIst = `${dateParts.find((part) => part.type === "year")?.value}-${dateParts.find((part) => part.type === "month")?.value}-${dateParts.find((part) => part.type === "day")?.value}`;
+    if (parsed.data.startDate < todayIst) return response.status(400).json({ error: "Leave requests cannot be submitted for past dates. Please choose today or a future date (IST)." });
+    if (parsed.data.endDate < parsed.data.startDate) return response.status(400).json({ error: "End date cannot be before start date" });
     const leave = await prisma.leaveRequest.create({
-      data: { ...parsed.data, status: "PENDING" },
+      data: { ...parsed.data, employeeId, status: "PENDING" },
     });
     if (leave.status === "APPROVED") await runFullTimecardScan();
     response.status(201).json(leave);

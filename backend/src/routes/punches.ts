@@ -4,11 +4,11 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { evaluateTimecard } from "../engine/evaluator";
 import type { LeaveContext, PunchInput, ShiftContext } from "../engine/timeMath";
-import { verifyToken } from "./auth";
+import { requireEmployeePunchAccess } from "../middleware/employeePunchAccess";
 
 export const punchesRouter = Router();
 
-punchesRouter.post("/api/punches", async (request, response, next) => {
+punchesRouter.post("/api/punches", requireEmployeePunchAccess, async (request, response, next) => {
   try {
     const parsed = z.object({
       employeeId: z.string().min(1),
@@ -18,24 +18,15 @@ punchesRouter.post("/api/punches", async (request, response, next) => {
     }).safeParse(request.body);
     if (!parsed.success) return response.status(400).json({ error: "Invalid punch", details: parsed.error.flatten() });
 
-    let source = parsed.data.source ?? "WEB_PORTAL";
-    const header = request.headers.authorization;
-    if (header?.startsWith("Bearer ")) {
-      const payload = verifyToken(header.slice(7));
-      if (payload?.role === "EMPLOYEE") {
-        source = "EMPLOYEE";
-        if (parsed.data.employeeId !== String(payload.sub)) return response.status(403).json({ error: "Employees may only log their own punches" });
-      }
-      if (payload?.role === "HR_ADMIN") source = "HR_MANUAL";
-    }
+    const source = "EMPLOYEE" as const;
 
     const timestamp = new Date(parsed.data.timestamp);
     const date = timestamp.toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    if ((source === "EMPLOYEE" || parsed.data.source === "EMPLOYEE") && date !== today) {
+    if (date !== today) {
       return response.status(400).json({ error: "Employees can only log punches for the current date." });
     }
-    if (source === "EMPLOYEE" || parsed.data.source === "EMPLOYEE") {
+    {
       const approvedLeave = await prisma.leaveRequest.findFirst({
         where: {
           employeeId: parsed.data.employeeId,
@@ -55,7 +46,7 @@ punchesRouter.post("/api/punches", async (request, response, next) => {
         date,
         punchType: parsed.data.punchType,
         timestamp,
-        source: source as "BIOMETRIC" | "WEB_PORTAL" | "HR_MANUAL" | "EMPLOYEE",
+        source,
       },
     });
 
@@ -127,27 +118,6 @@ punchesRouter.post("/api/punches", async (request, response, next) => {
       }
     }
 
-    if (source === "HR_MANUAL") {
-      const exception = await prisma.timecardException.findFirst({
-        where: { employeeId: parsed.data.employeeId, date },
-        orderBy: { updatedAt: "desc" },
-      });
-      if (exception) {
-        const beforePunches = allPunches.filter((item) => item.id !== punch.id);
-        await prisma.auditLog.create({
-          data: {
-            exceptionId: exception.id,
-            employeeId: parsed.data.employeeId,
-            actionBy: "HR_MANUAL",
-            decision: "EDITED_AND_APPROVED",
-            beforePunchesJson: beforePunches as unknown as Prisma.InputJsonValue,
-            afterPunchesJson: allPunches as unknown as Prisma.InputJsonValue,
-            citedPolicyCode: exception.anomalyCode,
-            notes: "Manual HR punch override",
-          },
-        });
-      }
-    }
     response.status(201).json({ punch, status: "RECORDED", deterministicEvaluationTriggered: Boolean(shift), flaggedAnomalies });
   } catch (error) {
     next(error);

@@ -1,7 +1,7 @@
 export function formatIstTime(isoString: string): string {
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return "--";
-  return `${new Intl.DateTimeFormat("en-IN", {
+  return `${new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Kolkata",
     hour: "2-digit",
     minute: "2-digit",
@@ -12,7 +12,7 @@ export function formatIstTime(isoString: string): string {
 export function formatIstDateTime(isoString: string): string {
   const date = new Date(isoString);
   if (Number.isNaN(date.getTime())) return "--";
-  const formatted = new Intl.DateTimeFormat("en-IN", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Kolkata",
     day: "2-digit",
     month: "short",
@@ -20,8 +20,9 @@ export function formatIstDateTime(isoString: string): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  }).format(date);
-  return `${formatted} IST`;
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("day")} ${part("month")} ${part("year")}, ${part("hour")}:${part("minute")} ${part("dayPeriod")} IST`;
 }
 
 export function toIstDatetimeLocalInput(isoString: string): string {

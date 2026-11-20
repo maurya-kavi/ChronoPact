@@ -58,7 +58,11 @@ export function simulateAndVerifyFix(
   proposedPunches: PunchInput[],
   baseContext: TimecardEvaluationContext,
   activePolicies?: ActivePolicy[],
+  proposedActionType?: string,
 ): { isSafe: boolean; remainingAnomalies: DetectedAnomaly[] } {
+  if (proposedActionType === "REJECT_INVALID_PUNCH" && proposedPunches.length === 0) {
+    return { isSafe: true, remainingAnomalies: [] };
+  }
   const remainingAnomalies = evaluateTimecard(proposedPunches, baseContext, activePolicies);
   const materialAnomalies = remainingAnomalies.filter((a) => a.severity === "HIGH" || a.severity === "MEDIUM");
   const isSafe = materialAnomalies.length === 0;
