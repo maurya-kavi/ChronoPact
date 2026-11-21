@@ -7,7 +7,7 @@
 | Deliverable | Link |
 | :--- | :--- |
 | **5-Slide Final Presentation (PPT)** | [View Presentation](https://docs.google.com/presentation/d/1ccd8FW0foo9EvYwU7c1tyYXpVSu0jpXk/edit?usp=drive_link&ouid=116701994795863449755&rtpof=true&sd=true) |
-| **10-Minute End-to-End Demo Video** | [Watch Demo Recording](https://nitjsr-my.sharepoint.com/:v:/g/personal/2023ugee041_nitjsr_onmicrosoft_com/IQBLExKeGzaLTZbtzF4Xdi9GAYVD9Ig5qTF9ljbf_bvslaw?e=fcb4sd) |
+| **19-Minute End-to-End Demo Video** | [Watch Demo Recording](https://nitjsr-my.sharepoint.com/:v:/g/personal/2023ugee041_nitjsr_onmicrosoft_com/IQBkAFzQkbhfT5Uw0D5oXhxHAWSDYbPnzhhn1kI7QOy7WR8?e=RQOPDd) |
 | **Author Resume / CV (Kavindra Kumar)** | [View Resume](https://drive.google.com/file/d/1CO51djNVW2X6BkyoxZqRvd3QdZoc_i0u/view?usp=sharing) |
 
 ---
